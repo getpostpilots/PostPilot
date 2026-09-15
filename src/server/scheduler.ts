@@ -1,20 +1,23 @@
-import { createServerFn } from '@tanstack/react-start'
+import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { runDueCampaigns } from './campaign-engine'
 import { DEMO_MODE } from '../lib/demo-mode'
 
 const TICK_MS = 5 * 60 * 1000 // 5 minutes
 
 // In-process scheduler: no deployed server exists yet, so this only runs
-// for as long as `npm run dev`'s Node process stays alive - closing the
-// terminal/laptop pauses scheduled campaigns until it's started again.
-// Guarded on globalThis (not a module-level let) so Vite's dev-mode HMR,
+// for as long as the Node process stays alive - a Render free-tier
+// spin-down or a local terminal close pauses scheduled campaigns until
+// something (routes/api/ping.ts, or the client useEffect below) starts it
+// again. Guarded on globalThis (not a module-level let) so dev-mode HMR,
 // which can re-evaluate this module without restarting the process, can't
 // spin up a second interval.
-// Exported (not just called internally) so both startScheduler below and
-// routes/api/ping.ts's plain HTTP handler can trigger it - the ping route is
-// what actually matters in production, since a cron service hitting it is a
-// real request with no browser/JS involved, unlike the client useEffect.
-export function ensureSchedulerRunning() {
+//
+// Wrapped in createServerOnlyFn (not a plain exported function) because
+// this module gets imported from routes/app/route.tsx, which is shared
+// client/server code - without this wrapper, the bundler pulled this
+// function's whole import chain (down to genuinely server-only cookie/Node
+// APIs in supabase-server.ts) into the client bundle and broke the build.
+export const ensureSchedulerRunning = createServerOnlyFn(() => {
   if (DEMO_MODE) return
   const g = globalThis as any
   if (g.__postpilotSchedulerStarted) return
@@ -25,7 +28,7 @@ export function ensureSchedulerRunning() {
   }
   tick()
   setInterval(tick, TICK_MS)
-}
+})
 
 // Called once from the client on app load (see routes/app/route.tsx) purely
 // to trigger this module's server-side execution - createServerFn's
