@@ -92,3 +92,57 @@ export const listPosts = createServerFn({ method: 'GET' })
     if (error) throw new Error(error.message)
     return rows
   })
+
+async function firstAccount(userId: string, supabase: Awaited<ReturnType<typeof requireUser>>['supabase']) {
+  const { data } = await supabase.from('linkedin_accounts').select('*').eq('user_id', userId).order('created_at', { ascending: true }).limit(1).maybeSingle()
+  return data
+}
+
+// Combined reads for pages that were doing "fetch account, then fetch data
+// scoped to that account" as two sequential network round-trips - each of
+// those doubled the page's load latency for no reason, since the account
+// lookup and the follow-up query don't need the client in between them.
+export const getScheduledPageData = createServerFn({ method: 'GET' }).handler(async () => {
+  if (DEMO_MODE) {
+    return {
+      account: { ...demoAccount, timezone: demoAccount.timezone },
+      posts: demoPosts.filter((p) => ['draft', 'approved', 'scheduled', 'failed'].includes(p.state)).map(withPillar),
+      campaigns: [],
+    }
+  }
+  const { user, supabase } = await requireUser()
+  const account = await firstAccount(user.id, supabase)
+  if (!account) return { account: null, posts: [], campaigns: [] }
+
+  const [{ data: posts }, { data: campaigns }] = await Promise.all([
+    supabase
+      .from('posts')
+      .select('*, content_pillars(name, kind), campaigns(name)')
+      .eq('account_id', account.id)
+      .in('state', ['draft', 'approved', 'scheduled', 'failed'])
+      .order('created_at', { ascending: false })
+      .limit(200),
+    supabase.from('campaigns').select('*, campaign_topics(*), campaign_images(*)').eq('account_id', account.id).order('created_at', { ascending: false }),
+  ])
+  return { account, posts: posts ?? [], campaigns: campaigns ?? [] }
+})
+
+export const getPublishedPageData = createServerFn({ method: 'GET' })
+  .validator((data: { limit: number }) => data)
+  .handler(async ({ data }) => {
+    if (DEMO_MODE) {
+      return { account: demoAccount, posts: demoPosts.filter((p) => p.state === 'published').map(withPillar).slice(0, data.limit) }
+    }
+    const { user, supabase } = await requireUser()
+    const account = await firstAccount(user.id, supabase)
+    if (!account) return { account: null, posts: [] }
+
+    const { data: posts } = await supabase
+      .from('posts')
+      .select('*, content_pillars(name, kind), campaigns(name)')
+      .eq('account_id', account.id)
+      .eq('state', 'published')
+      .order('published_at', { ascending: false })
+      .limit(data.limit)
+    return { account, posts: posts ?? [] }
+  })

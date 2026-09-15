@@ -1,7 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { getDashboard } from '../../server/dashboard'
-import { createCampaign, deleteCampaign, listCampaigns, postCampaignNowFn, setCampaignStatus, updateCampaign } from '../../server/campaigns'
+import { createCampaign, deleteCampaign, getCampaignsPageData, postCampaignNowFn, setCampaignStatus, updateCampaign } from '../../server/campaigns'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Label } from '../../components/ui/label'
@@ -35,12 +34,11 @@ function Campaigns() {
 
   async function refresh() {
     try {
-      const dashboard = await getDashboard()
-      const account = dashboard.accounts[0]
-      if (!account) return
-      setAccountId(account.id)
-      setTimezone(account.timezone || 'UTC')
-      setCampaigns(await listCampaigns({ data: { accountId: account.id } }))
+      const data = await getCampaignsPageData()
+      if (!data.account) return
+      setAccountId(data.account.id)
+      setTimezone(data.account.timezone || 'UTC')
+      setCampaigns(data.campaigns)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load campaigns.')
     }

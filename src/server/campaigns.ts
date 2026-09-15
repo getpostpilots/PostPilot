@@ -40,6 +40,22 @@ export const listCampaigns = createServerFn({ method: 'GET' })
     return rows
   })
 
+// Combined read for the Campaigns page - used to be "fetch account, then
+// fetch campaigns scoped to it" as two sequential network round-trips.
+export const getCampaignsPageData = createServerFn({ method: 'GET' }).handler(async () => {
+  if (DEMO_MODE) return { account: demoAccount, campaigns: demoCampaigns }
+  const { user, supabase } = await requireUser()
+  const { data: account } = await supabase.from('linkedin_accounts').select('*').eq('user_id', user.id).order('created_at', { ascending: true }).limit(1).maybeSingle()
+  if (!account) return { account: null, campaigns: [] }
+  const { data: campaigns, error } = await supabase
+    .from('campaigns')
+    .select('*, campaign_topics(*), campaign_images(*)')
+    .eq('account_id', account.id)
+    .order('created_at', { ascending: false })
+  if (error) throw new Error(error.message)
+  return { account, campaigns }
+})
+
 export const createCampaign = createServerFn({ method: 'POST' })
   .validator((data: NewCampaignInput) => data)
   .handler(async ({ data }) => {

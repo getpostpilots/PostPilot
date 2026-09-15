@@ -31,8 +31,9 @@ function Setup() {
 
   async function refresh() {
     try {
-      setData(await getDashboard())
-      setKeyStatus(await getKeyStatus())
+      const [dashboard, key] = await Promise.all([getDashboard(), getKeyStatus()])
+      setData(dashboard)
+      setKeyStatus(key)
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load configuration.')
     }

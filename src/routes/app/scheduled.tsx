@@ -1,8 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { getDashboard, listPosts } from '../../server/dashboard'
+import { getScheduledPageData } from '../../server/dashboard'
 import { deletePost, publishNow, setPostState, updatePostBody } from '../../server/posts'
-import { listCampaigns, postCampaignNowFn } from '../../server/campaigns'
+import { postCampaignNowFn } from '../../server/campaigns'
 import { postHeading, postSource } from '../../lib/post-display'
 import { nextRunMinutesFromNow } from '../../lib/timezones'
 import { Button } from '../../components/ui/button'
@@ -26,17 +26,10 @@ function Scheduled() {
 
   async function refresh() {
     try {
-      const data = await getDashboard()
-      const acc = data.accounts[0] ?? null
-      setAccount(acc)
-      if (acc) {
-        const [rows, camps] = await Promise.all([
-          listPosts({ data: { accountId: acc.id, states: ['draft', 'approved', 'scheduled', 'failed'], limit: 200 } }),
-          listCampaigns({ data: { accountId: acc.id } }),
-        ])
-        setPosts(rows)
-        setCampaigns(camps)
-      }
+      const data = await getScheduledPageData()
+      setAccount(data.account)
+      setPosts(data.posts)
+      setCampaigns(data.campaigns)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load.')
     }

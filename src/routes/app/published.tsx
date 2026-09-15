@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { getDashboard, listPosts } from '../../server/dashboard'
+import { getPublishedPageData, listPosts } from '../../server/dashboard'
 import { postHeading, postSource } from '../../lib/post-display'
 import { Card, CardContent } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
@@ -19,13 +19,11 @@ function Published() {
   async function refresh() {
     setError('')
     try {
-      const dashboard = await getDashboard()
-      const account = dashboard.accounts[0]
-      if (!account) return
-      setAccountId(account.id)
-      const rows = await listPosts({ data: { accountId: account.id, states: ['published'], orderBy: 'published_at', limit: PAGE_SIZE } })
-      setPosts(rows)
-      setHasMore(rows.length === PAGE_SIZE)
+      const data = await getPublishedPageData({ data: { limit: PAGE_SIZE } })
+      if (!data.account) return
+      setAccountId(data.account.id)
+      setPosts(data.posts)
+      setHasMore(data.posts.length === PAGE_SIZE)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load published posts.')
     }
