@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppRouteRouteImport } from './routes/app/route'
+import { Route as ApiPingRouteImport } from './routes/api/ping'
 import { Route as AppIndexRouteImport } from './routes/app/index'
 import { Route as AppCampaignsRouteImport } from './routes/app/campaigns'
 import { Route as AppDecisionsRouteImport } from './routes/app/decisions'
@@ -28,6 +29,11 @@ const IndexRoute = IndexRouteImport.update({
 const AppRouteRoute = AppRouteRouteImport.update({
   id: '/app',
   path: '/app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPingRoute = ApiPingRouteImport.update({
+  id: '/api/ping',
+  path: '/api/ping',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -74,6 +80,7 @@ const ApiLinkedinCallbackRoute = ApiLinkedinCallbackRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteRouteWithChildren
+  '/api/ping': typeof ApiPingRoute
   '/app/campaigns': typeof AppCampaignsRoute
   '/app/decisions': typeof AppDecisionsRoute
   '/app/new-post': typeof AppNewPostRoute
@@ -85,6 +92,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/ping': typeof ApiPingRoute
   '/app/campaigns': typeof AppCampaignsRoute
   '/app/decisions': typeof AppDecisionsRoute
   '/app/new-post': typeof AppNewPostRoute
@@ -98,6 +106,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteRouteWithChildren
+  '/api/ping': typeof ApiPingRoute
   '/app/campaigns': typeof AppCampaignsRoute
   '/app/decisions': typeof AppDecisionsRoute
   '/app/new-post': typeof AppNewPostRoute
@@ -112,6 +121,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/app'
+    | '/api/ping'
     | '/app/campaigns'
     | '/app/decisions'
     | '/app/new-post'
@@ -123,6 +133,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/api/ping'
     | '/app/campaigns'
     | '/app/decisions'
     | '/app/new-post'
@@ -135,6 +146,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/app'
+    | '/api/ping'
     | '/app/campaigns'
     | '/app/decisions'
     | '/app/new-post'
@@ -148,6 +160,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRouteRoute: typeof AppRouteRouteWithChildren
+  ApiPingRoute: typeof ApiPingRoute
   ApiLinkedinCallbackRoute: typeof ApiLinkedinCallbackRoute
 }
 
@@ -165,6 +178,13 @@ declare module '@tanstack/react-router' {
       path: '/app'
       fullPath: '/app'
       preLoaderRoute: typeof AppRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/ping': {
+      id: '/api/ping'
+      path: '/api/ping'
+      fullPath: '/api/ping'
+      preLoaderRoute: typeof ApiPingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/': {
@@ -253,6 +273,7 @@ const AppRouteRouteWithChildren = AppRouteRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRouteRoute: AppRouteRouteWithChildren,
+  ApiPingRoute: ApiPingRoute,
   ApiLinkedinCallbackRoute: ApiLinkedinCallbackRoute,
 }
 export const routeTree = rootRouteImport
