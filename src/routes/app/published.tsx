@@ -1,25 +1,52 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { getDashboard } from '../../server/dashboard'
+import { getDashboard, listPosts } from '../../server/dashboard'
 import { postHeading, postSource } from '../../lib/post-display'
 import { Card, CardContent } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 
 export const Route = createFileRoute('/app/published')({ component: Published })
 
+const PAGE_SIZE = 30
+
 function Published() {
+  const [accountId, setAccountId] = useState<string | null>(null)
   const [posts, setPosts] = useState<any[] | null>(null)
   const [error, setError] = useState('')
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
 
-  function refresh() {
+  async function refresh() {
     setError('')
-    getDashboard()
-      .then((d) => setPosts(d.posts.filter((p: any) => p.state === 'published')))
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load published posts.'))
+    try {
+      const dashboard = await getDashboard()
+      const account = dashboard.accounts[0]
+      if (!account) return
+      setAccountId(account.id)
+      const rows = await listPosts({ data: { accountId: account.id, states: ['published'], orderBy: 'published_at', limit: PAGE_SIZE } })
+      setPosts(rows)
+      setHasMore(rows.length === PAGE_SIZE)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load published posts.')
+    }
   }
   useEffect(() => {
     refresh()
   }, [])
+
+  async function loadMore() {
+    if (!accountId || !posts) return
+    setLoadingMore(true)
+    try {
+      const more = await listPosts({ data: { accountId, states: ['published'], orderBy: 'published_at', offset: posts.length, limit: PAGE_SIZE } })
+      setPosts([...posts, ...more])
+      setHasMore(more.length === PAGE_SIZE)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load more.')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   if (error) {
     return (
@@ -44,6 +71,12 @@ function Published() {
           <PublishedRow key={post.id} post={post} />
         ))}
       </div>
+
+      {hasMore && (
+        <Button variant="outline" className="w-fit" disabled={loadingMore} onClick={loadMore}>
+          {loadingMore ? 'Loading...' : 'Load more'}
+        </Button>
+      )}
     </div>
   )
 }

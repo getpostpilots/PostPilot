@@ -3,13 +3,16 @@ import { requireUser } from '../lib/supabase-server'
 import { DEMO_MODE } from '../lib/demo-mode'
 import { demoAccount, demoFounderPov, demoLogs, demoPillars, demoPosts, demoVoiceProfile, withPillar } from '../lib/demo-data'
 
-// Aggregate read powering the Overview page: the active LinkedIn account (if
-// any), its posts, pillars, voice profile, founder POV, and recent audit log.
+// Aggregate read powering most pages: the active LinkedIn account (if any),
+// its pillars/voice/founder POV, publish stats, and a recent audit-log
+// preview. Deliberately does NOT include posts - that grows unboundedly as
+// drafts/campaigns pile up, and this used to fetch every post ever made on
+// every single page navigation. Pages that need post rows call listPosts
+// below with the specific slice they actually need.
 export const getDashboard = createServerFn({ method: 'GET' }).handler(async () => {
   if (DEMO_MODE) {
     return {
       accounts: [{ ...demoAccount, content_pillars: demoPillars, voice_profiles: [demoVoiceProfile], founder_pov: demoFounderPov }],
-      posts: demoPosts.map(withPillar),
       logs: demoLogs,
       stats: {
         published: demoPosts.filter((p) => p.state === 'published').length,
@@ -23,9 +26,7 @@ export const getDashboard = createServerFn({ method: 'GET' }).handler(async () =
   const [{ data: accounts }, { data: logs }] = await Promise.all([
     supabase
       .from('linkedin_accounts')
-      .select(
-        '*, content_pillars(*), voice_profiles(*), founder_pov(*)',
-      )
+      .select('*, content_pillars(*), voice_profiles(*), founder_pov(*)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: true }),
     supabase
@@ -37,24 +38,17 @@ export const getDashboard = createServerFn({ method: 'GET' }).handler(async () =
   ])
 
   const accountIds = (accounts ?? []).map((a) => a.id)
-  const { data: posts } = accountIds.length
-    ? await supabase
-        .from('posts')
-        .select('*, content_pillars(name, kind), campaigns(name)')
-        .in('account_id', accountIds)
-        .order('created_at', { ascending: false })
-    : { data: [] }
-
-  const stats = {
-    published: (posts ?? []).filter((p) => p.state === 'published').length,
-    queued: (posts ?? []).filter((p) => ['draft', 'approved', 'scheduled'].includes(p.state)).length,
-  }
+  const [{ count: published }, { count: queued }] = accountIds.length
+    ? await Promise.all([
+        supabase.from('posts').select('id', { count: 'exact', head: true }).in('account_id', accountIds).eq('state', 'published'),
+        supabase.from('posts').select('id', { count: 'exact', head: true }).in('account_id', accountIds).in('state', ['draft', 'approved', 'scheduled']),
+      ])
+    : [{ count: 0 }, { count: 0 }]
 
   return {
     accounts: accounts ?? [],
-    posts: posts ?? [],
     logs: logs ?? [],
-    stats,
+    stats: { published: published ?? 0, queued: queued ?? 0 },
   }
 })
 
@@ -72,6 +66,29 @@ export const listDecisionLogs = createServerFn({ method: 'GET' })
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .range(data.offset, data.offset + data.limit - 1)
+    if (error) throw new Error(error.message)
+    return rows
+  })
+
+// Targeted post reads for Scheduled/Published pages - each asks for exactly
+// the states and page size it needs, instead of every page pulling the
+// account's entire post history.
+export const listPosts = createServerFn({ method: 'GET' })
+  .validator((data: { accountId: string; states: string[]; orderBy?: 'created_at' | 'published_at'; offset?: number; limit: number }) => data)
+  .handler(async ({ data }) => {
+    if (DEMO_MODE) {
+      const filtered = demoPosts.filter((p) => data.states.includes(p.state)).map(withPillar)
+      const offset = data.offset ?? 0
+      return filtered.slice(offset, offset + data.limit)
+    }
+    const { supabase } = await requireUser()
+    const { data: rows, error } = await supabase
+      .from('posts')
+      .select('*, content_pillars(name, kind), campaigns(name)')
+      .eq('account_id', data.accountId)
+      .in('state', data.states)
+      .order(data.orderBy ?? 'created_at', { ascending: false })
+      .range(data.offset ?? 0, (data.offset ?? 0) + data.limit - 1)
     if (error) throw new Error(error.message)
     return rows
   })
