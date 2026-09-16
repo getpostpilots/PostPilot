@@ -83,7 +83,7 @@ export function campaignImagePromptFor(
     brand?.description ? `Company this represents: ${brand.description}` : '',
     palette.length ? `Lean on this brand color palette where it fits naturally (lighting, accents, props) - don't force it: ${palette.join(', ')}.` : '',
     hasReferenceImages
-      ? 'The attached images are style/mood inspiration only (palette, composition, tone) - do not reproduce them or their exact subjects. Generate a completely new, original image.'
+      ? "The attached images set the visual direction - match their palette, composition, tone, and the general kind of subject matter (e.g. if they're abstract/tech visuals with no people, keep this one abstract with no people too; if they show people in a setting, it's fine to include people in a similar setting). Don't reproduce any of them exactly or copy an identifiable real scene - generate a new, original image in the same visual family."
       : '',
     recentPrompts.length
       ? `Already used for this campaign - come up with a different scene/angle, not a variation of these:\n${recentPrompts.map((p) => `- ${p}`).join('\n')}`
