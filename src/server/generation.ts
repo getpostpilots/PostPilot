@@ -4,6 +4,7 @@ import { generateDraft } from '../lib/ai'
 import { fetchImageAsDataUrl, generateImage, imagePromptFor } from '../lib/image-ai'
 import { getProvider } from '../lib/ai-providers'
 import { resolveApiKey } from './settings'
+import { resolveImageUrls } from './image-library'
 import { DEMO_MODE } from '../lib/demo-mode'
 import {
   demoNow,
@@ -143,17 +144,31 @@ export const generateForPillar = createServerFn({ method: 'POST' })
           // upgrade to something smarter (e.g. per-pillar setting) if it
           // shows up too often/rarely in practice.
           const useLogo = pillar.kind === 'product' && account.logo_url && Math.random() < 0.25
-          imageDataUrl = useLogo
-            ? await fetchImageAsDataUrl(account.logo_url)
-            : await generateImage(
-                key.apiKey,
-                imagePromptFor(pillar.name, body, {
+          if (useLogo) {
+            imageDataUrl = await fetchImageAsDataUrl(account.logo_url)
+          } else {
+            const { data: library } = await supabase.from('image_library').select('id, url, storage_path').eq('user_id', user.id).limit(10)
+            const picked = (library ?? []).sort(() => Math.random() - 0.5).slice(0, 3)
+            const signedUrls = await resolveImageUrls(supabase, picked)
+            const referenceDataUrls = (
+              await Promise.all(picked.map((p) => fetchImageAsDataUrl(signedUrls.get(p.id) ?? '')))
+            ).filter((u): u is string => !!u)
+            imageDataUrl = await generateImage(
+              key.apiKey,
+              imagePromptFor(
+                pillar.name,
+                body,
+                {
                   description: account.brand_description,
                   primaryColor: account.brand_primary_color,
                   secondaryColor: account.brand_secondary_color,
                   tertiaryColor: account.brand_tertiary_color,
-                }),
-              )
+                },
+                referenceDataUrls.length > 0,
+              ),
+              referenceDataUrls,
+            )
+          }
         } catch (err) {
           console.error('Image generation failed:', err)
         }

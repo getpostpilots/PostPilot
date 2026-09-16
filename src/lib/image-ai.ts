@@ -33,13 +33,25 @@ export async function generateImage(apiKey: string, prompt: string, referenceIma
   return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`
 }
 
-export function imagePromptFor(pillarName: string, postBody: string, brand?: Brand): string {
+// Shared between imagePromptFor and campaignImagePromptFor - reference
+// images should steer subject matter too (people or not, abstract vs.
+// product shots), not just palette/tone, or generation defaults to a
+// generic "person using a hologram" trope regardless of what's in the
+// library. Still avoids reproducing any one image exactly.
+function referenceImageNote(hasReferenceImages: boolean): string {
+  return hasReferenceImages
+    ? "The attached images set the visual direction - match their palette, composition, tone, and the general kind of subject matter (e.g. if they're abstract/tech visuals with no people, keep this one abstract with no people too; if they show people in a setting, it's fine to include people in a similar setting). Don't reproduce any of them exactly or copy an identifiable real scene - generate a new, original image in the same visual family."
+    : ''
+}
+
+export function imagePromptFor(pillarName: string, postBody: string, brand?: Brand, hasReferenceImages = false): string {
   const palette = [brand?.primaryColor, brand?.secondaryColor, brand?.tertiaryColor].filter(Boolean)
   return [
     `A single professional, editorial-style photograph or illustration to accompany a LinkedIn post about "${pillarName}".`,
     `Post content for context: ${postBody.slice(0, 400)}`,
     brand?.description ? `Company this represents: ${brand.description}` : '',
     palette.length ? `Lean on this brand color palette where it fits naturally (lighting, accents, props) - don't force it: ${palette.join(', ')}.` : '',
+    referenceImageNote(hasReferenceImages),
     'No text, no logos, no watermarks in the image. Clean, modern, business-appropriate.',
   ]
     .filter(Boolean)
@@ -82,9 +94,7 @@ export function campaignImagePromptFor(
     `Post content for context: ${postBody.slice(0, 400)}`,
     brand?.description ? `Company this represents: ${brand.description}` : '',
     palette.length ? `Lean on this brand color palette where it fits naturally (lighting, accents, props) - don't force it: ${palette.join(', ')}.` : '',
-    hasReferenceImages
-      ? "The attached images set the visual direction - match their palette, composition, tone, and the general kind of subject matter (e.g. if they're abstract/tech visuals with no people, keep this one abstract with no people too; if they show people in a setting, it's fine to include people in a similar setting). Don't reproduce any of them exactly or copy an identifiable real scene - generate a new, original image in the same visual family."
-      : '',
+    referenceImageNote(hasReferenceImages),
     recentPrompts.length
       ? `Already used for this campaign - come up with a different scene/angle, not a variation of these:\n${recentPrompts.map((p) => `- ${p}`).join('\n')}`
       : '',
