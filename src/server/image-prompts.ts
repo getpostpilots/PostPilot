@@ -1,8 +1,9 @@
 import { createServerFn } from '@tanstack/react-start'
 import { requireUser } from '../lib/supabase-server'
-import { customImagePromptFor, generateImage } from '../lib/image-ai'
+import { customImagePromptFor, fetchImageAsDataUrl, generateImage } from '../lib/image-ai'
 import { getProvider } from '../lib/ai-providers'
 import { resolveApiKey } from './settings'
+import { resolveImageUrls } from './image-library'
 import { DEMO_MODE } from '../lib/demo-mode'
 import { demoPosts, logDemo } from '../lib/demo-data'
 
@@ -60,14 +61,27 @@ export const regenerateImage = createServerFn({ method: 'POST' })
     if (!key) throw new Error('Add an AI provider key in Setup before generating images.')
     if (!getProvider(key.provider).supportsImages) throw new Error(`${getProvider(key.provider).label} doesn't support image generation - switch to Gemini in Setup.`)
 
+    const { data: library } = await supabase.from('image_library').select('id, url, storage_path').eq('user_id', user.id).limit(10)
+    const picked = (library ?? []).sort(() => Math.random() - 0.5).slice(0, 3)
+    const signedUrls = await resolveImageUrls(supabase, picked)
+    const referenceDataUrls = (
+      await Promise.all(picked.map((p) => fetchImageAsDataUrl(signedUrls.get(p.id) ?? '')))
+    ).filter((u): u is string => !!u)
+
     const imageDataUrl = await generateImage(
       key.apiKey,
-      customImagePromptFor(prompt, post.body, {
-        description: account.brand_description,
-        primaryColor: account.brand_primary_color,
-        secondaryColor: account.brand_secondary_color,
-        tertiaryColor: account.brand_tertiary_color,
-      }),
+      customImagePromptFor(
+        prompt,
+        post.body,
+        {
+          description: account.brand_description,
+          primaryColor: account.brand_primary_color,
+          secondaryColor: account.brand_secondary_color,
+          tertiaryColor: account.brand_tertiary_color,
+        },
+        referenceDataUrls.length > 0,
+      ),
+      referenceDataUrls,
     )
     if (!imageDataUrl) throw new Error('The model did not return an image - try a different prompt.')
 

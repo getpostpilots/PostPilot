@@ -64,13 +64,14 @@ type Brand = { description?: string | null; primaryColor?: string | null; second
 // launching, matching the post") is the main instruction; we still append
 // the actual hex codes, post context, and a couple of safety defaults so it
 // stays grounded even if the user's wording is vague.
-export function customImagePromptFor(userPrompt: string, postBody: string, brand?: Brand): string {
+export function customImagePromptFor(userPrompt: string, postBody: string, brand?: Brand, hasReferenceImages = false): string {
   const palette = [brand?.primaryColor, brand?.secondaryColor, brand?.tertiaryColor].filter(Boolean)
   return [
     userPrompt,
     `Post this image supports: ${postBody.slice(0, 400)}`,
     brand?.description ? `Company this represents: ${brand.description}` : '',
     palette.length ? `Brand colors to draw from: ${palette.join(', ')}.` : '',
+    referenceImageNote(hasReferenceImages),
     'No watermarks. Clean, modern, business-appropriate, unless the prompt explicitly asks otherwise.',
   ]
     .filter(Boolean)
