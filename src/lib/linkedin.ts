@@ -7,7 +7,7 @@ const TOKEN_URL = 'https://www.linkedin.com/oauth/v2/accessToken'
 const USERINFO_URL = 'https://api.linkedin.com/v2/userinfo'
 const POSTS_URL = 'https://api.linkedin.com/rest/posts'
 const IMAGES_URL = 'https://api.linkedin.com/rest/images'
-const LINKEDIN_API_VERSION = '202509' // bump periodically per LinkedIn's versioning docs
+const LINKEDIN_API_VERSION = '202608' // bump periodically per LinkedIn's versioning docs - versions expire ~12mo after release
 
 const SCOPES = ['openid', 'profile', 'w_member_social']
 

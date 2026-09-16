@@ -1,5 +1,6 @@
 import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { runDueCampaigns } from './campaign-engine'
+import { runDueScheduledPosts } from './posts'
 import { DEMO_MODE } from '../lib/demo-mode'
 
 const TICK_MS = 5 * 60 * 1000 // 5 minutes
@@ -25,6 +26,7 @@ export const ensureSchedulerRunning = createServerOnlyFn(() => {
 
   const tick = () => {
     runDueCampaigns().catch((err) => console.error('Scheduler tick failed:', err))
+    runDueScheduledPosts().catch((err) => console.error('Scheduler tick failed:', err))
   }
   tick()
   setInterval(tick, TICK_MS)

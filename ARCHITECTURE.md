@@ -92,15 +92,16 @@ way — success or failure, so the audit trail never has a gap.
 These are deliberate simplifications, not oversights — flagging them for the
 audit rather than building them speculatively:
 
-1. **No scheduler.** `posts.scheduled_at` is stored and the UI lets you pick a
-   time, but nothing actually flips `scheduled → published` when that time
-   arrives yet. Needs a cron (Supabase Edge Function on a schedule, or any
-   external cron hitting a new `runScheduledPosts` server fn) that finds due
-   `scheduled` posts and calls the same publish path as `publishNow`.
-2. **No pacing enforcement.** `daily_cap` / `weekly_cap` / `min_gap_minutes`
+1. ~~No scheduler.~~ Fixed: `server/posts.ts`'s `runDueScheduledPosts` finds
+   due `scheduled` posts and publishes them via the same path as
+   `publishNow`; `server/scheduler.ts`'s tick calls it alongside
+   `runDueCampaigns`.
+2. **No pacing enforcement for manually-scheduled posts.** `daily_cap` /
+   `weekly_cap` / `min_gap_minutes`
    are stored and shown in Setup, but nothing checks them before publishing
-   yet. Cadence enforced these before releasing a post — same should happen
-   here, in the scheduler once it exists (item 1).
+   yet (campaigns already enforce them in `runCampaign`). Cadence enforced
+   these before releasing a post — same should happen in
+   `runDueScheduledPosts` (item 1).
 3. **No token refresh.** `linkedin_accounts.refresh_token_enc` is stored but
    nothing uses it yet to renew an expiring `access_token`. Needs a check +
    refresh call before publish, or a scheduled job that renews accounts

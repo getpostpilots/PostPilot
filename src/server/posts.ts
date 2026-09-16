@@ -1,5 +1,5 @@
-import { createServerFn } from '@tanstack/react-start'
-import { requireUser } from '../lib/supabase-server'
+import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
+import { requireUser, supabaseAdmin } from '../lib/supabase-server'
 import { publishPost, uploadImage } from '../lib/linkedin'
 import { getValidAccessToken } from './linkedin'
 import { DEMO_MODE } from '../lib/demo-mode'
@@ -328,3 +328,54 @@ export const publishNow = createServerFn({ method: 'POST' })
       throw err
     }
   })
+
+// Called by the in-process scheduler tick (see server/scheduler.ts) to flip
+// due `scheduled` posts to `published` - the cron publishNow's comment used
+// to call "not-yet-built" (ARCHITECTURE.md "Known gaps" #1). Same publish
+// path as publishNow, but on the service-role client since a background
+// timer has no logged-in user to scope an RLS client to.
+//
+// Wrapped in createServerOnlyFn, not a plain exported function - this
+// module is imported from routes/app/scheduled.tsx (client code), and a
+// plain export here drags supabase-server.ts's cookie/Node APIs into the
+// client bundle and breaks the build. Same fix as server/scheduler.ts.
+export const runDueScheduledPosts = createServerOnlyFn(async () => {
+  const supabase = supabaseAdmin()
+  const { data: posts } = await supabase
+    .from('posts')
+    .select('*')
+    .eq('state', 'scheduled')
+    .lte('scheduled_at', new Date().toISOString())
+
+  for (const post of posts ?? []) {
+    const { data: account, error: accErr } = await supabase
+      .from('linkedin_accounts')
+      .select('*')
+      .eq('id', post.account_id)
+      .single()
+    if (accErr || !account) {
+      console.error(`Scheduled post ${post.id}: account not found`)
+      continue
+    }
+    if (account.kill_switch_engaged) {
+      await logDecision(supabase, post.user_id, account.id, post.id, 'safety', 'Publish blocked', 'Kill switch is engaged.', 'error')
+      continue
+    }
+
+    try {
+      const accessToken = await getValidAccessToken(account, supabase)
+      const imageUrn = post.image_data_url ? await uploadImage(accessToken, account.member_sub, post.image_data_url) : null
+      const urn = await publishPost(accessToken, account.member_sub, post.body, imageUrn)
+      await supabase
+        .from('posts')
+        .update({ state: 'published', published_at: new Date().toISOString(), linkedin_post_urn: urn, linkedin_image_urn: imageUrn })
+        .eq('id', post.id)
+      await logDecision(supabase, post.user_id, account.id, post.id, 'release', 'Published', 'Posted to LinkedIn via the scheduler.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      await supabase.from('posts').update({ state: 'failed', failure_reason: message }).eq('id', post.id)
+      await logDecision(supabase, post.user_id, account.id, post.id, 'release', 'Publish failed', message, 'error')
+      console.error(`Scheduled post ${post.id} publish failed:`, err)
+    }
+  }
+})
