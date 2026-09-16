@@ -187,13 +187,13 @@ function ScheduledPostRow({ post, busy, onBusy }: { post: any; busy: boolean; on
                   Save edit
                 </Button>
               )}
-              {['draft', 'approved', 'scheduled'].includes(post.state) && (
+              {['draft', 'approved', 'scheduled', 'failed'].includes(post.state) && (
                 <>
                   <Button size="sm" variant="outline" disabled={busy} onClick={() => onBusy(() => setPostState({ data: { postId: post.id, state: 'killed' } }))}>
                     Reject
                   </Button>
                   <Button size="sm" disabled={busy} onClick={() => onBusy(() => publishNow({ data: { postId: post.id } }))}>
-                    Post now
+                    {post.state === 'failed' ? 'Retry' : 'Post now'}
                   </Button>
                   <input
                     type="datetime-local"
