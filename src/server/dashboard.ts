@@ -122,7 +122,7 @@ export const getScheduledPageData = createServerFn({ method: 'GET' }).handler(as
       .in('state', ['draft', 'approved', 'scheduled', 'failed'])
       .order('created_at', { ascending: false })
       .limit(200),
-    supabase.from('campaigns').select('*, campaign_topics(*), campaign_images(*)').eq('account_id', account.id).order('created_at', { ascending: false }),
+    supabase.from('campaigns').select('*, campaign_topics(*), campaign_library_images(image_library_id)').eq('account_id', account.id).order('created_at', { ascending: false }),
   ])
   return { account, posts: posts ?? [], campaigns: campaigns ?? [] }
 })

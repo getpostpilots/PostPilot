@@ -11,7 +11,7 @@ type NewCampaignInput = {
   daysOfWeek: number[]
   postTime: string
   topics: string[]
-  imageUrls: string[]
+  imageIds: string[]
 }
 
 function endDateFor(durationType: NewCampaignInput['durationType'], startDate: Date): string | null {
@@ -33,7 +33,7 @@ export const listCampaigns = createServerFn({ method: 'GET' })
     const { supabase } = await requireUser()
     const { data: rows, error } = await supabase
       .from('campaigns')
-      .select('*, campaign_topics(*), campaign_images(*)')
+      .select('*, campaign_topics(*), campaign_library_images(image_library_id)')
       .eq('account_id', data.accountId)
       .order('created_at', { ascending: false })
     if (error) throw new Error(error.message)
@@ -49,7 +49,7 @@ export const getCampaignsPageData = createServerFn({ method: 'GET' }).handler(as
   if (!account) return { account: null, campaigns: [] }
   const { data: campaigns, error } = await supabase
     .from('campaigns')
-    .select('*, campaign_topics(*), campaign_images(*)')
+    .select('*, campaign_topics(*), campaign_library_images(image_library_id)')
     .eq('account_id', account.id)
     .order('created_at', { ascending: false })
   if (error) throw new Error(error.message)
@@ -60,7 +60,7 @@ export const createCampaign = createServerFn({ method: 'POST' })
   .validator((data: NewCampaignInput) => data)
   .handler(async ({ data }) => {
     const topics = data.topics.map((t) => t.trim()).filter(Boolean)
-    const imageUrls = data.imageUrls.map((u) => u.trim()).filter(Boolean)
+    const imageIds = [...new Set(data.imageIds.filter(Boolean))]
     if (topics.length === 0) throw new Error('Add at least one topic.')
     if (data.daysOfWeek.length === 0) throw new Error('Pick at least one day.')
 
@@ -82,7 +82,9 @@ export const createCampaign = createServerFn({ method: 'POST' })
         last_run_at: null,
         next_topic_index: 0,
         campaign_topics: topics.map((topic, i) => ({ id: newDemoId(), topic, order_index: i })),
-        campaign_images: imageUrls.map((url) => ({ id: newDemoId(), url })),
+        // Demo mode has no real library/Storage to back a picker against -
+        // always empty, picker is inert but present.
+        campaign_library_images: [] as { image_library_id: string }[],
       }
       demoCampaigns.unshift(campaign)
       logDemo('campaign', 'Campaign created', `"${data.name}" - ${topics.length} topic(s), demo mode (not scheduled for real).`)
@@ -112,10 +114,10 @@ export const createCampaign = createServerFn({ method: 'POST' })
         .insert(topics.map((topic, i) => ({ user_id: user.id, campaign_id: campaign.id, topic, order_index: i })))
       if (topicsErr) throw new Error(topicsErr.message)
     }
-    if (imageUrls.length) {
+    if (imageIds.length) {
       const { error: imagesErr } = await supabase
-        .from('campaign_images')
-        .insert(imageUrls.map((url) => ({ user_id: user.id, campaign_id: campaign.id, url })))
+        .from('campaign_library_images')
+        .insert(imageIds.map((image_library_id) => ({ user_id: user.id, campaign_id: campaign.id, image_library_id })))
       if (imagesErr) throw new Error(imagesErr.message)
     }
 
@@ -137,14 +139,14 @@ type EditCampaignInput = {
   daysOfWeek: number[]
   postTime: string
   topics: string[]
-  imageUrls: string[]
+  imageIds: string[]
 }
 
 export const updateCampaign = createServerFn({ method: 'POST' })
   .validator((data: EditCampaignInput) => data)
   .handler(async ({ data }) => {
     const topics = data.topics.map((t) => t.trim()).filter(Boolean)
-    const imageUrls = data.imageUrls.map((u) => u.trim()).filter(Boolean)
+    const imageIds = [...new Set(data.imageIds.filter(Boolean))]
     if (topics.length === 0) throw new Error('Add at least one topic.')
     if (data.daysOfWeek.length === 0) throw new Error('Pick at least one day.')
 
@@ -167,7 +169,8 @@ export const updateCampaign = createServerFn({ method: 'POST' })
           ...(restarting ? { status: 'active', last_run_date: null, last_run_at: null } : {}),
         })
         c.campaign_topics = topics.map((topic, i) => ({ id: newDemoId(), topic, order_index: i }))
-        c.campaign_images = imageUrls.map((url) => ({ id: newDemoId(), url }))
+        // Demo mode has no real library to back a picker against - stays empty.
+        c.campaign_library_images = []
         logDemo('campaign', 'Campaign edited', `"${data.name}" updated (demo mode).`)
       }
       return { ok: true }
@@ -199,17 +202,17 @@ export const updateCampaign = createServerFn({ method: 'POST' })
     // than diffing, and topic order/content changing invalidates the old
     // round-robin position anyway (hence resetting next_topic_index above).
     await supabase.from('campaign_topics').delete().eq('campaign_id', data.campaignId)
-    await supabase.from('campaign_images').delete().eq('campaign_id', data.campaignId)
+    await supabase.from('campaign_library_images').delete().eq('campaign_id', data.campaignId)
     if (topics.length) {
       const { error: topicsErr } = await supabase
         .from('campaign_topics')
         .insert(topics.map((topic, i) => ({ user_id: user.id, campaign_id: data.campaignId, topic, order_index: i })))
       if (topicsErr) throw new Error(topicsErr.message)
     }
-    if (imageUrls.length) {
+    if (imageIds.length) {
       const { error: imagesErr } = await supabase
-        .from('campaign_images')
-        .insert(imageUrls.map((url) => ({ user_id: user.id, campaign_id: data.campaignId, url })))
+        .from('campaign_library_images')
+        .insert(imageIds.map((image_library_id) => ({ user_id: user.id, campaign_id: data.campaignId, image_library_id })))
       if (imagesErr) throw new Error(imagesErr.message)
     }
 

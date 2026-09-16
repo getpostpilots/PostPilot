@@ -15,6 +15,7 @@ import { Route as ApiPingRouteImport } from './routes/api/ping'
 import { Route as AppIndexRouteImport } from './routes/app/index'
 import { Route as AppCampaignsRouteImport } from './routes/app/campaigns'
 import { Route as AppDecisionsRouteImport } from './routes/app/decisions'
+import { Route as AppImageLibraryRouteImport } from './routes/app/image-library'
 import { Route as AppNewPostRouteImport } from './routes/app/new-post'
 import { Route as AppPublishedRouteImport } from './routes/app/published'
 import { Route as AppScheduledRouteImport } from './routes/app/scheduled'
@@ -51,6 +52,11 @@ const AppDecisionsRoute = AppDecisionsRouteImport.update({
   path: '/decisions',
   getParentRoute: () => AppRouteRoute,
 } as any)
+const AppImageLibraryRoute = AppImageLibraryRouteImport.update({
+  id: '/image-library',
+  path: '/image-library',
+  getParentRoute: () => AppRouteRoute,
+} as any)
 const AppNewPostRoute = AppNewPostRouteImport.update({
   id: '/new-post',
   path: '/new-post',
@@ -83,6 +89,7 @@ export interface FileRoutesByFullPath {
   '/api/ping': typeof ApiPingRoute
   '/app/campaigns': typeof AppCampaignsRoute
   '/app/decisions': typeof AppDecisionsRoute
+  '/app/image-library': typeof AppImageLibraryRoute
   '/app/new-post': typeof AppNewPostRoute
   '/app/published': typeof AppPublishedRoute
   '/app/scheduled': typeof AppScheduledRoute
@@ -95,6 +102,7 @@ export interface FileRoutesByTo {
   '/api/ping': typeof ApiPingRoute
   '/app/campaigns': typeof AppCampaignsRoute
   '/app/decisions': typeof AppDecisionsRoute
+  '/app/image-library': typeof AppImageLibraryRoute
   '/app/new-post': typeof AppNewPostRoute
   '/app/published': typeof AppPublishedRoute
   '/app/scheduled': typeof AppScheduledRoute
@@ -109,6 +117,7 @@ export interface FileRoutesById {
   '/api/ping': typeof ApiPingRoute
   '/app/campaigns': typeof AppCampaignsRoute
   '/app/decisions': typeof AppDecisionsRoute
+  '/app/image-library': typeof AppImageLibraryRoute
   '/app/new-post': typeof AppNewPostRoute
   '/app/published': typeof AppPublishedRoute
   '/app/scheduled': typeof AppScheduledRoute
@@ -124,6 +133,7 @@ export interface FileRouteTypes {
     | '/api/ping'
     | '/app/campaigns'
     | '/app/decisions'
+    | '/app/image-library'
     | '/app/new-post'
     | '/app/published'
     | '/app/scheduled'
@@ -136,6 +146,7 @@ export interface FileRouteTypes {
     | '/api/ping'
     | '/app/campaigns'
     | '/app/decisions'
+    | '/app/image-library'
     | '/app/new-post'
     | '/app/published'
     | '/app/scheduled'
@@ -149,6 +160,7 @@ export interface FileRouteTypes {
     | '/api/ping'
     | '/app/campaigns'
     | '/app/decisions'
+    | '/app/image-library'
     | '/app/new-post'
     | '/app/published'
     | '/app/scheduled'
@@ -208,6 +220,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDecisionsRouteImport
       parentRoute: typeof AppRouteRoute
     }
+    '/app/image-library': {
+      id: '/app/image-library'
+      path: '/image-library'
+      fullPath: '/app/image-library'
+      preLoaderRoute: typeof AppImageLibraryRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
     '/app/new-post': {
       id: '/app/new-post'
       path: '/new-post'
@@ -249,6 +268,7 @@ declare module '@tanstack/react-router' {
 interface AppRouteRouteChildren {
   AppCampaignsRoute: typeof AppCampaignsRoute
   AppDecisionsRoute: typeof AppDecisionsRoute
+  AppImageLibraryRoute: typeof AppImageLibraryRoute
   AppNewPostRoute: typeof AppNewPostRoute
   AppPublishedRoute: typeof AppPublishedRoute
   AppScheduledRoute: typeof AppScheduledRoute
@@ -259,6 +279,7 @@ interface AppRouteRouteChildren {
 const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppCampaignsRoute: AppCampaignsRoute,
   AppDecisionsRoute: AppDecisionsRoute,
+  AppImageLibraryRoute: AppImageLibraryRoute,
   AppNewPostRoute: AppNewPostRoute,
   AppPublishedRoute: AppPublishedRoute,
   AppScheduledRoute: AppScheduledRoute,

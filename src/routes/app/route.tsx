@@ -15,6 +15,7 @@ const NAV = [
   { to: '/app/scheduled', label: 'Scheduled posts' },
   { to: '/app/published', label: 'Published posts' },
   { to: '/app/campaigns', label: 'Campaigns' },
+  { to: '/app/image-library', label: 'Image library' },
   { to: '/app/decisions', label: 'Audit trail' },
   { to: '/app/setup', label: 'Configuration' },
 ] as const

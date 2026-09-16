@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { createCampaign, deleteCampaign, getCampaignsPageData, postCampaignNowFn, setCampaignStatus, updateCampaign } from '../../server/campaigns'
+import { listLibraryImages } from '../../server/image-library'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Label } from '../../components/ui/label'
@@ -8,11 +9,14 @@ import { Textarea } from '../../components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../components/ui/dialog'
 import { describeNextRun } from '../../lib/timezones'
 
 export const Route = createFileRoute('/app/campaigns')({ component: Campaigns })
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+type LibraryImage = { id: string; displayUrl: string }
 
 type CampaignFormValues = {
   name: string
@@ -20,13 +24,14 @@ type CampaignFormValues = {
   days: number[]
   postTime: string
   topics: string
-  imageUrls: string
+  imageIds: string[]
 }
 
 function Campaigns() {
   const [accountId, setAccountId] = useState<string | null>(null)
   const [timezone, setTimezone] = useState('UTC')
   const [campaigns, setCampaigns] = useState<any[] | null>(null)
+  const [library, setLibrary] = useState<LibraryImage[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -45,6 +50,7 @@ function Campaigns() {
   }
   useEffect(() => {
     refresh()
+    listLibraryImages().then(setLibrary).catch(() => {})
   }, [])
 
   async function run(id: string, fn: () => Promise<unknown>) {
@@ -94,6 +100,7 @@ function Campaigns() {
           <CardContent>
             <CampaignForm
               submitLabel="Create campaign"
+              library={library}
               onSubmit={async (values) => {
                 await createCampaign({
                   data: {
@@ -103,7 +110,7 @@ function Campaigns() {
                     daysOfWeek: values.days,
                     postTime: values.postTime,
                     topics: values.topics.split('\n'),
-                    imageUrls: values.imageUrls.split('\n'),
+                    imageIds: values.imageIds,
                   },
                 })
                 setShowForm(false)
@@ -117,7 +124,7 @@ function Campaigns() {
       <div className="grid gap-3">
         {campaigns.length === 0 && <p className="text-sm text-muted-foreground">No campaigns yet.</p>}
         {campaigns.map((c) => (
-          <CampaignRow key={c.id} campaign={c} timezone={timezone} busy={busyId === c.id} onBusy={(fn) => run(c.id, fn)} onSaved={refresh} />
+          <CampaignRow key={c.id} campaign={c} timezone={timezone} library={library} busy={busyId === c.id} onBusy={(fn) => run(c.id, fn)} onSaved={refresh} />
         ))}
       </div>
     </div>
@@ -127,19 +134,21 @@ function Campaigns() {
 function CampaignRow({
   campaign,
   timezone,
+  library,
   busy,
   onBusy,
   onSaved,
 }: {
   campaign: any
   timezone: string
+  library: LibraryImage[]
   busy: boolean
   onBusy: (fn: () => Promise<unknown>) => void
   onSaved: () => Promise<void>
 }) {
   const [editing, setEditing] = useState(false)
   const topics = campaign.campaign_topics ?? []
-  const images = campaign.campaign_images ?? []
+  const images = campaign.campaign_library_images ?? []
   const nextTopic = topics.length ? topics[campaign.next_topic_index % topics.length]?.topic : null
   // next_topic_index already points at the *next* one, so the topic behind
   // it is whichever one the last run actually used.
@@ -154,13 +163,14 @@ function CampaignRow({
         <CardContent>
           <CampaignForm
             submitLabel="Save changes"
+            library={library}
             initial={{
               name: campaign.name,
               durationType: campaign.duration_type,
               days: campaign.days_of_week,
               postTime: campaign.post_time,
               topics: topics.map((t: any) => t.topic).join('\n'),
-              imageUrls: images.map((i: any) => i.url).join('\n'),
+              imageIds: images.map((i: any) => i.image_library_id),
             }}
             onSubmit={async (values) => {
               await updateCampaign({
@@ -171,7 +181,7 @@ function CampaignRow({
                   daysOfWeek: values.days,
                   postTime: values.postTime,
                   topics: values.topics.split('\n'),
-                  imageUrls: values.imageUrls.split('\n'),
+                  imageIds: values.imageIds,
                 },
               })
               setEditing(false)
@@ -239,11 +249,13 @@ function CampaignRow({
 function CampaignForm({
   initial,
   submitLabel,
+  library,
   onSubmit,
   onCancel,
 }: {
   initial?: CampaignFormValues
   submitLabel: string
+  library: LibraryImage[]
   onSubmit: (values: CampaignFormValues) => Promise<void>
   onCancel?: () => void
 }) {
@@ -252,7 +264,7 @@ function CampaignForm({
   const [days, setDays] = useState<number[]>(initial?.days ?? [1, 2, 3, 4, 5])
   const [postTime, setPostTime] = useState(initial?.postTime ?? '17:00')
   const [topics, setTopics] = useState(initial?.topics ?? '')
-  const [imageUrls, setImageUrls] = useState(initial?.imageUrls ?? '')
+  const [imageIds, setImageIds] = useState<string[]>(initial?.imageIds ?? [])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -260,11 +272,15 @@ function CampaignForm({
     setDays((ds) => (ds.includes(d) ? ds.filter((x) => x !== d) : [...ds, d].sort()))
   }
 
+  function toggleImage(id: string) {
+    setImageIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]))
+  }
+
   async function submit() {
     setBusy(true)
     setError('')
     try {
-      await onSubmit({ name, durationType, days, postTime, topics, imageUrls })
+      await onSubmit({ name, durationType, days, postTime, topics, imageIds })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save campaign.')
     } finally {
@@ -309,8 +325,35 @@ function CampaignForm({
       <Label>Topics - one per line, cycled in order, never repeated back to back</Label>
       <Textarea rows={5} value={topics} onChange={(e) => setTopics(e.target.value)} placeholder={'Announcing the new AI qualification feature\nCustomer story: agency doubled booked calls\nBehind the scenes: how the AI decides B2B vs B2C'} />
 
-      <Label>Inspiration images (optional) - one URL per line, used as style reference, never reproduced as-is</Label>
-      <Textarea rows={3} value={imageUrls} onChange={(e) => setImageUrls(e.target.value)} placeholder="https://..." />
+      <Label>Inspiration images (optional) - style reference from your image library, never reproduced as-is</Label>
+      <Dialog>
+        <DialogTrigger asChild>
+          <Button type="button" variant="outline" size="sm" className="w-fit">
+            Choose images ({imageIds.length} selected)
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Choose inspiration images</DialogTitle>
+          </DialogHeader>
+          {library.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No images in your library yet - add some from the Image library page.</p>
+          ) : (
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+              {library.map((img) => (
+                <button
+                  key={img.id}
+                  type="button"
+                  onClick={() => toggleImage(img.id)}
+                  className={`aspect-square overflow-hidden rounded-md border-2 ${imageIds.includes(img.id) ? 'border-primary' : 'border-transparent'}`}
+                >
+                  <img src={img.displayUrl} alt="" className="h-full w-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <div className="flex gap-2">
         <Button size="sm" className="w-fit" disabled={busy || !name.trim() || !topics.trim()} onClick={submit}>

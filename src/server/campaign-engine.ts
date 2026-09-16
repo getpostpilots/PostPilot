@@ -5,6 +5,7 @@ import { getProvider } from '../lib/ai-providers'
 import { resolveApiKey } from './settings'
 import { publishPost, uploadImage } from '../lib/linkedin'
 import { getValidAccessToken } from './linkedin'
+import { resolveImageUrls } from './image-library'
 
 // Server-only: the actual campaign tick logic, run either by the in-process
 // scheduler (see server/scheduler.ts) on a timer, or on-demand via "Post
@@ -134,9 +135,20 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
   let imagePrompt: string | null = null
   if (getProvider(key.provider).supportsImages) {
     try {
-      const { data: library } = await supabase.from('campaign_images').select('url').eq('campaign_id', campaign.id).limit(10)
-      const refUrls = (library ?? []).map((i) => i.url).sort(() => Math.random() - 0.5).slice(0, 2)
-      const referenceDataUrls = (await Promise.all(refUrls.map((u) => fetchImageAsDataUrl(u)))).filter((u): u is string => !!u)
+      const { data: links } = await supabase
+        .from('campaign_library_images')
+        .select('image_library(id, url, storage_path)')
+        .eq('campaign_id', campaign.id)
+        .limit(10)
+      const picked = (links ?? [])
+        .map((l: any) => l.image_library)
+        .filter(Boolean)
+        .sort(() => Math.random() - 0.5)
+        .slice(0, 3) // was 2 - generateImage caps at 3, match it so refs are fully used
+      const signedUrls = await resolveImageUrls(supabase, picked)
+      const referenceDataUrls = (
+        await Promise.all(picked.map((p: any) => fetchImageAsDataUrl(signedUrls.get(p.id) ?? '')))
+      ).filter((u): u is string => !!u)
 
       imagePrompt = campaignImagePromptFor(
         topic.topic,
