@@ -6,16 +6,51 @@ import { resolveApiKey } from './settings'
 import { publishPost, uploadImage } from '../lib/linkedin'
 import { getValidAccessToken } from './linkedin'
 import { resolveImageUrls } from './image-library'
+import { zonedTimeToUtcIso } from '../lib/timezones'
 
 // Server-only: the actual campaign tick logic, run either by the in-process
 // scheduler (see server/scheduler.ts) on a timer, or on-demand via "Post
 // now" (server/campaigns.ts's postCampaignNow) for the next single topic.
 // Caps and the min-gap guardrail always apply either way - "Post now" only
-// skips the day/time/already-ran-today gate, never the safety limits.
+// skips the day/already-ran-today gate, never the safety limits.
 // Uses the service-role client since a background timer has no logged-in
 // user/request to scope an RLS client to.
 type AdminClient = ReturnType<typeof supabaseAdmin>
-type RunResult = { status: 'posted' | 'failed' | 'skipped'; reason?: string }
+type RunResult = { status: 'posted' | 'scheduled' | 'failed' | 'skipped'; reason?: string }
+
+// Daily/weekly publish caps and cross-campaign spacing - the safety limits
+// that apply no matter how a post reaches the publish step (automatic tick,
+// "Post now", or a pre-generated campaign post whose scheduled_at has come
+// due). Exported so posts.ts's scheduler can re-check it right before
+// publishing a campaign-originated scheduled post, since generation and
+// publish are no longer the same instant.
+export async function checkPublishGuardrails(supabase: AdminClient, account: any): Promise<{ ok: true } | { ok: false; kind: 'cap' | 'spacing'; reason: string }> {
+  // ponytail: rolling 24h/7d windows rather than exact local-midnight
+  // boundaries - close enough for a pacing guardrail, upgrade if it matters.
+  const [{ count: dailyCount }, { count: weeklyCount }] = await Promise.all([
+    supabase.from('posts').select('id', { count: 'exact', head: true }).eq('account_id', account.id).eq('state', 'published').gte('published_at', new Date(Date.now() - 24 * 3600 * 1000).toISOString()),
+    supabase.from('posts').select('id', { count: 'exact', head: true }).eq('account_id', account.id).eq('state', 'published').gte('published_at', new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()),
+  ])
+  if ((dailyCount ?? 0) >= account.daily_cap) return { ok: false, kind: 'cap', reason: 'Daily publish cap reached.' }
+  if ((weeklyCount ?? 0) >= account.weekly_cap) return { ok: false, kind: 'cap', reason: 'Weekly publish cap reached.' }
+
+  const { data: lastPublished } = await supabase
+    .from('posts')
+    .select('published_at')
+    .eq('account_id', account.id)
+    .eq('state', 'published')
+    .order('published_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (lastPublished?.published_at) {
+    const minutesSince = (Date.now() - new Date(lastPublished.published_at).getTime()) / 60000
+    if (minutesSince < account.min_gap_minutes) {
+      const waitMin = Math.ceil(account.min_gap_minutes - minutesSince)
+      return { ok: false, kind: 'spacing', reason: `Too soon after the last post - wait ${waitMin} more minute${waitMin === 1 ? '' : 's'}.` }
+    }
+  }
+  return { ok: true }
+}
 
 function localParts(tz: string): { date: string; time: string; dayOfWeek: number } {
   const now = new Date()
@@ -42,7 +77,7 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
   if (!account) return { status: 'skipped', reason: 'Account not found.' }
   if (account.kill_switch_engaged) return { status: 'skipped', reason: 'Kill switch is engaged.' }
 
-  const { date: today, time: nowTime, dayOfWeek } = localParts(account.timezone || 'UTC')
+  const { date: today, dayOfWeek } = localParts(account.timezone || 'UTC')
 
   if (campaign.end_date && today > campaign.end_date) {
     await supabase.from('campaigns').update({ status: 'completed' }).eq('id', campaign.id)
@@ -50,47 +85,25 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
     return { status: 'skipped', reason: 'Campaign has ended.' }
   }
 
+  // Automatic ticks generate as soon as it's a scheduled day (not yet run
+  // today) so the post can sit pre-made and wait for post_time to actually
+  // publish - see the scheduling branch below. "Post now" (skipScheduleGate)
+  // still needs today-not-yet-run to avoid double-posting the same slot.
   if (!opts.skipScheduleGate) {
     if (campaign.last_run_date === today) return { status: 'skipped', reason: 'Already ran today.' }
     if (!campaign.days_of_week.includes(dayOfWeek)) return { status: 'skipped', reason: 'Not a scheduled day.' }
-    if (nowTime < campaign.post_time) return { status: 'skipped', reason: 'Not time yet.' }
   }
 
-  // ponytail: rolling 24h/7d windows rather than exact local-midnight
-  // boundaries - close enough for a pacing guardrail, upgrade if it matters.
-  const [{ count: dailyCount }, { count: weeklyCount }] = await Promise.all([
-    supabase.from('posts').select('id', { count: 'exact', head: true }).eq('account_id', account.id).eq('state', 'published').gte('published_at', new Date(Date.now() - 24 * 3600 * 1000).toISOString()),
-    supabase.from('posts').select('id', { count: 'exact', head: true }).eq('account_id', account.id).eq('state', 'published').gte('published_at', new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()),
-  ])
-  if ((dailyCount ?? 0) >= account.daily_cap) {
-    await logDecision(supabase, campaign, 'Skipped - daily publish cap reached.', 'warn')
-    await supabase.from('campaigns').update({ last_run_date: today, last_run_at: new Date().toISOString() }).eq('id', campaign.id)
-    return { status: 'skipped', reason: 'Daily publish cap reached.' }
-  }
-  if ((weeklyCount ?? 0) >= account.weekly_cap) {
-    await logDecision(supabase, campaign, 'Skipped - weekly publish cap reached.', 'warn')
-    await supabase.from('campaigns').update({ last_run_date: today, last_run_at: new Date().toISOString() }).eq('id', campaign.id)
-    return { status: 'skipped', reason: 'Weekly publish cap reached.' }
-  }
-
-  // Cross-campaign spacing guardrail: don't publish back-to-back with
-  // another post on this account. Doesn't consume today's run - the
-  // scheduler retries next tick once the gap clears on its own; a manual
-  // "Post now" click just reports back that it's too soon.
-  const { data: lastPublished } = await supabase
-    .from('posts')
-    .select('published_at')
-    .eq('account_id', account.id)
-    .eq('state', 'published')
-    .order('published_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (lastPublished?.published_at) {
-    const minutesSince = (Date.now() - new Date(lastPublished.published_at).getTime()) / 60000
-    if (minutesSince < account.min_gap_minutes) {
-      const waitMin = Math.ceil(account.min_gap_minutes - minutesSince)
-      return { status: 'skipped', reason: `Too soon after the last post - wait ${waitMin} more minute${waitMin === 1 ? '' : 's'}.` }
+  const guardrail = await checkPublishGuardrails(supabase, account)
+  if (!guardrail.ok) {
+    await logDecision(supabase, campaign, `Skipped - ${guardrail.reason}`, guardrail.kind === 'cap' ? 'warn' : 'info')
+    // Caps consume today's run; the spacing guardrail doesn't - the
+    // scheduler retries next tick once the gap clears on its own, and a
+    // manual "Post now" click just reports back that it's too soon.
+    if (guardrail.kind === 'cap') {
+      await supabase.from('campaigns').update({ last_run_date: today, last_run_at: new Date().toISOString() }).eq('id', campaign.id)
     }
+    return { status: 'skipped', reason: guardrail.reason }
   }
 
   const { data: topics } = await supabase.from('campaign_topics').select('*').eq('campaign_id', campaign.id).order('order_index')
@@ -163,9 +176,16 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
     }
   }
 
+  // "Post now" publishes this instant, same as always. An automatic tick
+  // instead saves the generated post as `scheduled` for today's post_time -
+  // the existing scheduled-posts runner (server/posts.ts) picks it up and
+  // publishes it (re-checking these same guardrails) once that time comes.
+  const immediate = !!opts.skipScheduleGate
+  const scheduledAt = immediate ? null : zonedTimeToUtcIso(account.timezone || 'UTC', today, campaign.post_time)
+
   const { data: post, error: insertErr } = await supabase
     .from('posts')
-    .insert({ user_id: campaign.user_id, account_id: account.id, campaign_id: campaign.id, pillar_id: null, topic: topic.topic, body, image_data_url: imageDataUrl, image_prompt: imagePrompt, state: 'approved' })
+    .insert({ user_id: campaign.user_id, account_id: account.id, campaign_id: campaign.id, pillar_id: null, topic: topic.topic, body, image_data_url: imageDataUrl, image_prompt: imagePrompt, state: immediate ? 'approved' : 'scheduled', scheduled_at: scheduledAt })
     .select()
     .single()
   if (insertErr || !post) {
@@ -174,18 +194,23 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
   }
 
   let result: RunResult
-  try {
-    const accessToken = await getValidAccessToken(account, supabase)
-    const imageUrn = imageDataUrl ? await uploadImage(accessToken, account.member_sub, imageDataUrl) : null
-    const urn = await publishPost(accessToken, account.member_sub, body, imageUrn)
-    await supabase.from('posts').update({ state: 'published', published_at: new Date().toISOString(), linkedin_post_urn: urn, linkedin_image_urn: imageUrn }).eq('id', post.id)
-    await logDecision(supabase, campaign, `Published to LinkedIn - topic "${topic.topic}".`)
-    result = { status: 'posted' }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    await supabase.from('posts').update({ state: 'failed', failure_reason: message }).eq('id', post.id)
-    await logDecision(supabase, campaign, `Generated but failed to publish - topic "${topic.topic}": ${message}`, 'error')
-    result = { status: 'failed', reason: message }
+  if (immediate) {
+    try {
+      const accessToken = await getValidAccessToken(account, supabase)
+      const imageUrn = imageDataUrl ? await uploadImage(accessToken, account.member_sub, imageDataUrl) : null
+      const urn = await publishPost(accessToken, account.member_sub, body, imageUrn)
+      await supabase.from('posts').update({ state: 'published', published_at: new Date().toISOString(), linkedin_post_urn: urn, linkedin_image_urn: imageUrn }).eq('id', post.id)
+      await logDecision(supabase, campaign, `Published to LinkedIn - topic "${topic.topic}".`)
+      result = { status: 'posted' }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      await supabase.from('posts').update({ state: 'failed', failure_reason: message }).eq('id', post.id)
+      await logDecision(supabase, campaign, `Generated but failed to publish - topic "${topic.topic}": ${message}`, 'error')
+      result = { status: 'failed', reason: message }
+    }
+  } else {
+    await logDecision(supabase, campaign, `Generated and scheduled for ${new Date(scheduledAt!).toLocaleString()} - topic "${topic.topic}".`)
+    result = { status: 'scheduled' }
   }
 
   await supabase.from('campaigns').update({ last_run_date: today, last_run_at: new Date().toISOString(), next_topic_index: (campaign.next_topic_index + 1) % topics.length }).eq('id', campaign.id)
@@ -205,8 +230,8 @@ export async function runDueCampaigns() {
 }
 
 // Manually fires the campaign's next single topic right now, skipping only
-// the day/time/already-ran gate - caps and the spacing guardrail still
-// apply and can still block it (the returned reason explains why).
+// the day/already-ran gate - caps and the spacing guardrail still apply and
+// can still block it (the returned reason explains why).
 export async function postCampaignNow(campaignId: string): Promise<RunResult> {
   const supabase = supabaseAdmin()
   const { data: campaign } = await supabase.from('campaigns').select('*').eq('id', campaignId).single()

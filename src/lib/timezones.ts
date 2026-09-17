@@ -92,6 +92,19 @@ export function nextRunMinutesFromNow(tz: string, daysOfWeek: number[], postTime
   return offset * 1440 + (postH * 60 + postM) - (nowH * 60 + nowM)
 }
 
+// Converts a wall-clock date+time in a given IANA timezone to the real UTC
+// instant (DST-aware) - e.g. a campaign's post_time "17:00" in
+// "America/Los_Angeles" on a given date. Standard trick: treat the wall-clock
+// numbers as if they were UTC, read the zone's offset at that instant, then
+// shift by it.
+export function zonedTimeToUtcIso(tz: string, dateStr: string, timeStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const [h, min] = timeStr.split(':').map(Number)
+  const naiveUtc = Date.UTC(y, m - 1, d, h, min)
+  const offset = offsetMinutes(tz, new Date(naiveUtc))
+  return new Date(naiveUtc - offset * 60000).toISOString()
+}
+
 export function buildTimezoneOptions(): TimezoneOption[] {
   const now = new Date()
   const zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : ['UTC']

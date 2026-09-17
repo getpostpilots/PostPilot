@@ -2,6 +2,7 @@ import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { requireUser, supabaseAdmin } from '../lib/supabase-server'
 import { publishPost, uploadImage } from '../lib/linkedin'
 import { getValidAccessToken } from './linkedin'
+import { checkPublishGuardrails } from './campaign-engine'
 import { DEMO_MODE } from '../lib/demo-mode'
 import {
   demoAccount,
@@ -360,6 +361,15 @@ export const runDueScheduledPosts = createServerOnlyFn(async () => {
     if (account.kill_switch_engaged) {
       await logDecision(supabase, post.user_id, account.id, post.id, 'safety', 'Publish blocked', 'Kill switch is engaged.', 'error')
       continue
+    }
+
+    // Campaign-generated posts are pre-made ahead of their post_time, so the
+    // caps/spacing checked at generation time may be stale by the time this
+    // fires - re-check right before publishing. Manually scheduled posts
+    // were never capped (the user explicitly chose to post them).
+    if (post.campaign_id) {
+      const guardrail = await checkPublishGuardrails(supabase, account)
+      if (!guardrail.ok) continue // leave it scheduled, retry next tick
     }
 
     try {
