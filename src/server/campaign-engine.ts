@@ -94,7 +94,11 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
     if (!campaign.days_of_week.includes(dayOfWeek)) return { status: 'skipped', reason: 'Not a scheduled day.' }
   }
 
-  const guardrail = await checkPublishGuardrails(supabase, account)
+  // Only "Post now" publishes this instant. An automatic tick just generates
+  // (at the first tick of the day, hours before post_time), so a rolling-24h
+  // cap check here would count yesterday's post and burn today's run - the
+  // scheduled-posts runner re-checks these right before actually publishing.
+  const guardrail = opts.skipScheduleGate ? await checkPublishGuardrails(supabase, account) : ({ ok: true } as const)
   if (!guardrail.ok) {
     await logDecision(supabase, campaign, `Skipped - ${guardrail.reason}`, guardrail.kind === 'cap' ? 'warn' : 'info')
     // Caps consume today's run; the spacing guardrail doesn't - the
