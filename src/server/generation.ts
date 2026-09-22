@@ -2,9 +2,12 @@ import { createServerFn } from '@tanstack/react-start'
 import { requireUser } from '../lib/supabase-server'
 import { generateDraft } from '../lib/ai'
 import { fetchImageAsDataUrl, generateImage, imagePromptFor } from '../lib/image-ai'
+import { buildVideoSearchQuery, selectStockVideo } from '../lib/video-ai'
+import { searchStockVideos } from '../lib/video-search'
 import { getProvider } from '../lib/ai-providers'
 import { resolveApiKey } from './settings'
 import { resolveImageUrls } from './image-library'
+import { nextMediaType } from './media-type'
 import { DEMO_MODE } from '../lib/demo-mode'
 import {
   demoNow,
@@ -103,6 +106,15 @@ export const generateForPillar = createServerFn({ method: 'POST' })
     ])
     if (!pillar || !account) throw new Error('Account or pillar not found.')
 
+    const { data: priorPillarPosts } = await supabase
+      .from('posts')
+      .select('video_search_query, video_provider_id')
+      .eq('pillar_id', data.pillarId)
+      .order('created_at', { ascending: false })
+      .limit(15)
+    const recentVideoQueries = (priorPillarPosts ?? []).map((p) => p.video_search_query).filter((p): p is string => !!p)
+    const recentVideoProviderIds = (priorPillarPosts ?? []).map((p) => p.video_provider_id).filter((p): p is string => !!p)
+
     const { data: job } = await supabase
       .from('generation_jobs')
       .insert({
@@ -135,9 +147,11 @@ export const generateForPillar = createServerFn({ method: 'POST' })
         },
       )
 
-      // Best-effort: a failed image shouldn't sink an otherwise-good draft.
+      const mediaType = nextMediaType(pillar)
+
+      // Best-effort: a failed image/video shouldn't sink an otherwise-good draft.
       let imageDataUrl: string | null = null
-      if (getProvider(key.provider).supportsImages) {
+      if (mediaType === 'image' && getProvider(key.provider).supportsImages) {
         try {
           // ponytail: simple 1-in-4 heuristic so product posts occasionally
           // carry the real brand logo instead of an AI-generated scene -
@@ -174,6 +188,27 @@ export const generateForPillar = createServerFn({ method: 'POST' })
         }
       }
 
+      let video: { url: string; thumbnailUrl: string; searchQuery: string; provider: string; providerId: string } | null = null
+      if (mediaType === 'video' && (process.env.PEXELS_API_KEY || process.env.PIXABAY_API_KEY)) {
+        try {
+          const searchQuery = await buildVideoSearchQuery(
+            key.provider,
+            key.apiKey,
+            key.model ?? undefined,
+            key.base_url ?? undefined,
+            pillar.name,
+            body,
+            { description: account.video_style_description, include: account.video_style_include, avoid: account.video_style_avoid },
+            recentVideoQueries,
+          )
+          const candidates = await searchStockVideos(searchQuery, { pexelsApiKey: process.env.PEXELS_API_KEY, pixabayApiKey: process.env.PIXABAY_API_KEY })
+          const picked = selectStockVideo(candidates, recentVideoProviderIds)
+          if (picked) video = { url: picked.videoUrl, thumbnailUrl: picked.thumbnailUrl, searchQuery, provider: picked.provider, providerId: picked.providerId }
+        } catch (err) {
+          console.error('Video search failed:', err)
+        }
+      }
+
       const { data: post } = await supabase
         .from('posts')
         .insert({
@@ -183,10 +218,17 @@ export const generateForPillar = createServerFn({ method: 'POST' })
           topic: pillar.name,
           body,
           image_data_url: imageDataUrl,
+          video_url: video?.url ?? null,
+          video_thumbnail_url: video?.thumbnailUrl ?? null,
+          video_search_query: video?.searchQuery ?? null,
+          video_provider: video?.provider ?? null,
+          video_provider_id: video?.providerId ?? null,
           state: 'draft',
         })
         .select()
         .single()
+
+      await supabase.from('content_pillars').update({ last_media_type: mediaType }).eq('id', data.pillarId)
 
       await supabase
         .from('generation_jobs')

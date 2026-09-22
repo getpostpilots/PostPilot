@@ -33,6 +33,8 @@ export const savePillars = createServerFn({ method: 'POST' })
         kind: 'founder' | 'product'
         targetShare: number
         ctaMechanic: 'discussion' | 'comment_gate'
+        mediaImage: boolean
+        mediaVideo: boolean
       }>
     }) => data,
   )
@@ -49,6 +51,9 @@ export const savePillars = createServerFn({ method: 'POST' })
           target_share: p.targetShare,
           cta_mechanic: p.ctaMechanic,
           active: true,
+          media_image: p.mediaImage,
+          media_video: p.mediaVideo,
+          last_media_type: null as 'image' | 'video' | null,
         })),
       )
       return { count: demoPillars.length }
@@ -65,6 +70,8 @@ export const savePillars = createServerFn({ method: 'POST' })
         kind: p.kind,
         target_share: p.targetShare,
         cta_mechanic: p.ctaMechanic,
+        media_image: p.mediaImage,
+        media_video: p.mediaVideo,
       })),
     )
     if (error) throw new Error(error.message)

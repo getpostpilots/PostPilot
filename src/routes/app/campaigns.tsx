@@ -25,6 +25,8 @@ type CampaignFormValues = {
   postTime: string
   topics: string
   imageIds: string[]
+  mediaImage: boolean
+  mediaVideo: boolean
 }
 
 function Campaigns() {
@@ -111,6 +113,8 @@ function Campaigns() {
                     postTime: values.postTime,
                     topics: values.topics.split('\n'),
                     imageIds: values.imageIds,
+                    mediaImage: values.mediaImage,
+                    mediaVideo: values.mediaVideo,
                   },
                 })
                 setShowForm(false)
@@ -171,6 +175,8 @@ function CampaignRow({
               postTime: campaign.post_time,
               topics: topics.map((t: any) => t.topic).join('\n'),
               imageIds: images.map((i: any) => i.image_library_id),
+              mediaImage: campaign.media_image ?? true,
+              mediaVideo: campaign.media_video ?? false,
             }}
             onSubmit={async (values) => {
               await updateCampaign({
@@ -182,6 +188,8 @@ function CampaignRow({
                   postTime: values.postTime,
                   topics: values.topics.split('\n'),
                   imageIds: values.imageIds,
+                  mediaImage: values.mediaImage,
+                  mediaVideo: values.mediaVideo,
                 },
               })
               setEditing(false)
@@ -265,6 +273,8 @@ function CampaignForm({
   const [postTime, setPostTime] = useState(initial?.postTime ?? '17:00')
   const [topics, setTopics] = useState(initial?.topics ?? '')
   const [imageIds, setImageIds] = useState<string[]>(initial?.imageIds ?? [])
+  const [mediaImage, setMediaImage] = useState(initial?.mediaImage ?? true)
+  const [mediaVideo, setMediaVideo] = useState(initial?.mediaVideo ?? false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -280,7 +290,7 @@ function CampaignForm({
     setBusy(true)
     setError('')
     try {
-      await onSubmit({ name, durationType, days, postTime, topics, imageIds })
+      await onSubmit({ name, durationType, days, postTime, topics, imageIds, mediaImage, mediaVideo })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save campaign.')
     } finally {
@@ -324,6 +334,19 @@ function CampaignForm({
 
       <Label>Topics - one per line, cycled in order, never repeated back to back</Label>
       <Textarea rows={5} value={topics} onChange={(e) => setTopics(e.target.value)} placeholder={'Announcing the new AI qualification feature\nCustomer story: agency doubled booked calls\nBehind the scenes: how the AI decides B2B vs B2C'} />
+
+      <Label>Generate</Label>
+      <div className="flex items-center gap-4 text-sm">
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={mediaImage} onChange={(e) => (e.target.checked || mediaVideo) && setMediaImage(e.target.checked)} />
+          Image
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={mediaVideo} onChange={(e) => (e.target.checked || mediaImage) && setMediaVideo(e.target.checked)} />
+          Video
+        </label>
+        {mediaImage && mediaVideo && <span className="text-xs text-muted-foreground">(alternates image/video each post)</span>}
+      </div>
 
       <Label>Inspiration images (optional) - style reference from your image library, never reproduced as-is</Label>
       <Dialog>

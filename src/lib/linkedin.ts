@@ -7,6 +7,7 @@ const TOKEN_URL = 'https://www.linkedin.com/oauth/v2/accessToken'
 const USERINFO_URL = 'https://api.linkedin.com/v2/userinfo'
 const POSTS_URL = 'https://api.linkedin.com/rest/posts'
 const IMAGES_URL = 'https://api.linkedin.com/rest/images'
+const VIDEOS_URL = 'https://api.linkedin.com/rest/videos'
 const LINKEDIN_API_VERSION = '202608' // bump periodically per LinkedIn's versioning docs - versions expire ~12mo after release
 
 const SCOPES = ['openid', 'profile', 'w_member_social']
@@ -114,7 +115,82 @@ export async function uploadImage(accessToken: string, memberSub: string, imageD
   return init.value.image
 }
 
-export async function publishPost(accessToken: string, memberSub: string, body: string, imageUrn?: string | null) {
+type VideoInitResponse = {
+  value: {
+    video: string
+    uploadToken: string
+    uploadInstructions: Array<{ uploadUrl: string; firstByte: number; lastByte: number }>
+  }
+}
+
+// Registers + uploads a video via LinkedIn's Videos API, returns the
+// resulting urn:li:video:.... Unlike uploadImage this is a real multi-part
+// flow: initialize (declares the size, gets back one uploadUrl per 4MB-ish
+// part), PUT each byte-range part collecting its ETag, then finalize with
+// those ETags as the uploadedPartIds.
+export async function uploadVideo(accessToken: string, memberSub: string, videoUrl: string): Promise<string> {
+  const sourceRes = await fetch(videoUrl)
+  if (!sourceRes.ok) throw new Error(`Fetching source video failed: ${sourceRes.status}`)
+  const bytes = Buffer.from(await sourceRes.arrayBuffer())
+
+  const initRes = await fetch(`${VIDEOS_URL}?action=initializeUpload`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+      'X-Restli-Protocol-Version': '2.0.0',
+      'LinkedIn-Version': LINKEDIN_API_VERSION,
+    },
+    body: JSON.stringify({
+      initializeUploadRequest: { owner: `urn:li:person:${memberSub}`, fileSizeBytes: bytes.length, uploadCaptions: false, uploadThumbnail: false },
+    }),
+  })
+  if (!initRes.ok) throw new Error(`LinkedIn video init failed: ${initRes.status} ${await initRes.text()}`)
+  const init = (await initRes.json()) as VideoInitResponse
+
+  const uploadedPartIds: string[] = []
+  for (const part of init.value.uploadInstructions) {
+    const partRes = await fetch(part.uploadUrl, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: bytes.subarray(part.firstByte, part.lastByte + 1) as BodyInit,
+    })
+    if (!partRes.ok) throw new Error(`LinkedIn video part upload failed: ${partRes.status} ${await partRes.text()}`)
+    const etag = partRes.headers.get('etag')
+    if (!etag) throw new Error('LinkedIn video part upload did not return an ETag')
+    uploadedPartIds.push(etag.replace(/^"|"$/g, ''))
+  }
+
+  const finalizeRes = await fetch(`${VIDEOS_URL}?action=finalizeUpload`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+      'X-Restli-Protocol-Version': '2.0.0',
+      'LinkedIn-Version': LINKEDIN_API_VERSION,
+    },
+    body: JSON.stringify({ finalizeUploadRequest: { video: init.value.video, uploadToken: init.value.uploadToken, uploadedPartIds } }),
+  })
+  if (!finalizeRes.ok) throw new Error(`LinkedIn video finalize failed: ${finalizeRes.status} ${await finalizeRes.text()}`)
+
+  return init.value.video
+}
+
+// Shared by every publish call site: a post carries either video_url or
+// image_data_url (never both), upload whichever is set and hand back its
+// media URN for publishPost. Replaces what used to be the same
+// `image_data_url ? uploadImage(...) : null` line duplicated 4 times.
+export async function uploadPostMedia(
+  accessToken: string,
+  memberSub: string,
+  post: { video_url?: string | null; image_data_url?: string | null },
+): Promise<{ urn: string; kind: 'image' | 'video' } | null> {
+  if (post.video_url) return { urn: await uploadVideo(accessToken, memberSub, post.video_url), kind: 'video' }
+  if (post.image_data_url) return { urn: await uploadImage(accessToken, memberSub, post.image_data_url), kind: 'image' }
+  return null
+}
+
+export async function publishPost(accessToken: string, memberSub: string, body: string, mediaUrn?: string | null) {
   const res = await fetch(POSTS_URL, {
     method: 'POST',
     headers: {
@@ -132,7 +208,7 @@ export async function publishPost(accessToken: string, memberSub: string, body: 
         targetEntities: [],
         thirdPartyDistributionChannels: [],
       },
-      ...(imageUrn ? { content: { media: { id: imageUrn } } } : {}),
+      ...(mediaUrn ? { content: { media: { id: mediaUrn } } } : {}),
       lifecycleState: 'PUBLISHED',
       isReshareDisabledByAuthor: false,
     }),

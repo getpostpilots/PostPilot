@@ -45,9 +45,11 @@ function stripEmDashes(text: string): string {
   return text.replace(/\s*—\s*/g, ' - ')
 }
 
-export async function generateDraft(providerId: string, apiKey: string, model: string | undefined, baseUrlOverride: string | undefined, ctx: GenerationContext): Promise<string> {
+// Raw text-completion call against the user's chosen provider - shared by
+// generateDraft (post bodies) and video-ai.ts (stock-search queries), so the
+// two transport branches (Anthropic vs OpenAI-compatible) only live once.
+export async function completeText(providerId: string, apiKey: string, model: string | undefined, baseUrlOverride: string | undefined, prompt: string, maxTokens = 700): Promise<string> {
   const provider = getProvider(providerId)
-  const prompt = buildPrompt(ctx)
   const chosenModel = model?.trim() || provider.defaultModel
 
   if (provider.transport === 'anthropic') {
@@ -60,13 +62,13 @@ export async function generateDraft(providerId: string, apiKey: string, model: s
       },
       body: JSON.stringify({
         model: chosenModel,
-        max_tokens: 700,
+        max_tokens: maxTokens,
         messages: [{ role: 'user', content: prompt }],
       }),
     })
     if (!res.ok) throw new Error(`Anthropic request failed: ${res.status} ${await res.text()}`)
     const data = await res.json()
-    return stripEmDashes(data.content?.[0]?.text?.trim() ?? '')
+    return data.content?.[0]?.text?.trim() ?? ''
   }
 
   // OpenAI-compatible transport (OpenAI, OpenRouter, Groq, custom endpoints)
@@ -81,7 +83,7 @@ export async function generateDraft(providerId: string, apiKey: string, model: s
     body: JSON.stringify({
       model: chosenModel,
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 700,
+      max_tokens: maxTokens,
       // Gemini 2.5 Flash "thinks" before answering, and those reasoning
       // tokens count against max_tokens - without this the response gets
       // cut off mid-post before any visible text comes out. Scoped to
@@ -91,5 +93,10 @@ export async function generateDraft(providerId: string, apiKey: string, model: s
   })
   if (!res.ok) throw new Error(`${provider.label} request failed: ${res.status} ${await res.text()}`)
   const data = await res.json()
-  return stripEmDashes(data.choices?.[0]?.message?.content?.trim() ?? '')
+  return data.choices?.[0]?.message?.content?.trim() ?? ''
+}
+
+export async function generateDraft(providerId: string, apiKey: string, model: string | undefined, baseUrlOverride: string | undefined, ctx: GenerationContext): Promise<string> {
+  const text = await completeText(providerId, apiKey, model, baseUrlOverride, buildPrompt(ctx))
+  return stripEmDashes(text)
 }

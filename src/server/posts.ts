@@ -1,6 +1,6 @@
 import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { requireUser, supabaseAdmin } from '../lib/supabase-server'
-import { publishPost, uploadImage } from '../lib/linkedin'
+import { publishPost, uploadPostMedia } from '../lib/linkedin'
 import { getValidAccessToken } from './linkedin'
 import { checkPublishGuardrails } from './campaign-engine'
 import { DEMO_MODE } from '../lib/demo-mode'
@@ -287,17 +287,16 @@ export const publishNow = createServerFn({ method: 'POST' })
 
     try {
       const accessToken = await getValidAccessToken(account, supabase)
-      const imageUrn = post.image_data_url
-        ? await uploadImage(accessToken, account.member_sub, post.image_data_url)
-        : null
-      const urn = await publishPost(accessToken, account.member_sub, post.body, imageUrn)
+      const media = await uploadPostMedia(accessToken, account.member_sub, post)
+      const urn = await publishPost(accessToken, account.member_sub, post.body, media?.urn)
       await supabase
         .from('posts')
         .update({
           state: 'published',
           published_at: new Date().toISOString(),
           linkedin_post_urn: urn,
-          linkedin_image_urn: imageUrn,
+          linkedin_image_urn: media?.kind === 'image' ? media.urn : null,
+          linkedin_video_urn: media?.kind === 'video' ? media.urn : null,
         })
         .eq('id', post.id)
       await logDecision(
@@ -374,11 +373,17 @@ export const runDueScheduledPosts = createServerOnlyFn(async () => {
 
     try {
       const accessToken = await getValidAccessToken(account, supabase)
-      const imageUrn = post.image_data_url ? await uploadImage(accessToken, account.member_sub, post.image_data_url) : null
-      const urn = await publishPost(accessToken, account.member_sub, post.body, imageUrn)
+      const media = await uploadPostMedia(accessToken, account.member_sub, post)
+      const urn = await publishPost(accessToken, account.member_sub, post.body, media?.urn)
       await supabase
         .from('posts')
-        .update({ state: 'published', published_at: new Date().toISOString(), linkedin_post_urn: urn, linkedin_image_urn: imageUrn })
+        .update({
+          state: 'published',
+          published_at: new Date().toISOString(),
+          linkedin_post_urn: urn,
+          linkedin_image_urn: media?.kind === 'image' ? media.urn : null,
+          linkedin_video_urn: media?.kind === 'video' ? media.urn : null,
+        })
         .eq('id', post.id)
       await logDecision(supabase, post.user_id, account.id, post.id, 'release', 'Published', 'Posted to LinkedIn via the scheduler.')
     } catch (err) {

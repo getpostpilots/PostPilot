@@ -22,6 +22,9 @@ export const demoAccount = {
   brand_secondary_color: null as string | null,
   brand_tertiary_color: null as string | null,
   brand_description: null as string | null,
+  video_style_description: null as string | null,
+  video_style_include: null as string | null,
+  video_style_avoid: null as string | null,
   created_at: now(),
 }
 
@@ -34,6 +37,9 @@ export type DemoPillar = {
   target_share: number
   cta_mechanic: 'discussion' | 'comment_gate'
   active: boolean
+  media_image: boolean
+  media_video: boolean
+  last_media_type: 'image' | 'video' | null
 }
 
 export const demoPillars: DemoPillar[] = [
@@ -46,6 +52,9 @@ export const demoPillars: DemoPillar[] = [
     target_share: 0.5,
     cta_mechanic: 'discussion',
     active: true,
+    media_image: true,
+    media_video: false,
+    last_media_type: null,
   },
   {
     id: 'demo-pillar-product',
@@ -56,6 +65,9 @@ export const demoPillars: DemoPillar[] = [
     target_share: 0.5,
     cta_mechanic: 'comment_gate',
     active: true,
+    media_image: true,
+    media_video: false,
+    last_media_type: null,
   },
 ]
 
@@ -98,6 +110,12 @@ export type DemoPost = {
   failure_reason: string | null
   created_at: string
   updated_at: string
+  image_data_url?: string | null
+  video_url?: string | null
+  video_thumbnail_url?: string | null
+  video_search_query?: string | null
+  video_provider?: string | null
+  video_provider_id?: string | null
 }
 
 export const demoPosts: DemoPost[] = [

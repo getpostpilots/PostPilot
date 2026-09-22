@@ -1,12 +1,15 @@
 import { supabaseAdmin } from '../lib/supabase-server'
 import { generateDraft } from '../lib/ai'
 import { generateImage, campaignImagePromptFor, fetchImageAsDataUrl } from '../lib/image-ai'
+import { buildVideoSearchQuery, selectStockVideo } from '../lib/video-ai'
+import { searchStockVideos } from '../lib/video-search'
 import { getProvider } from '../lib/ai-providers'
 import { resolveApiKey } from './settings'
-import { publishPost, uploadImage } from '../lib/linkedin'
+import { publishPost, uploadPostMedia } from '../lib/linkedin'
 import { getValidAccessToken } from './linkedin'
 import { resolveImageUrls } from './image-library'
 import { zonedTimeToUtcIso } from '../lib/timezones'
+import { nextMediaType } from './media-type'
 
 // Server-only: the actual campaign tick logic, run either by the in-process
 // scheduler (see server/scheduler.ts) on a timer, or on-demand via "Post
@@ -129,12 +132,14 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
   // model doesn't repeat itself as topics cycle back around.
   const { data: priorPosts } = await supabase
     .from('posts')
-    .select('body, image_prompt')
+    .select('body, image_prompt, video_search_query, video_provider_id')
     .eq('campaign_id', campaign.id)
     .order('created_at', { ascending: false })
     .limit(15)
   const recentBodies = (priorPosts ?? []).map((p) => p.body)
   const recentImagePrompts = (priorPosts ?? []).map((p) => p.image_prompt).filter((p): p is string => !!p)
+  const recentVideoQueries = (priorPosts ?? []).map((p) => p.video_search_query).filter((p): p is string => !!p)
+  const recentVideoProviderIds = (priorPosts ?? []).map((p) => p.video_provider_id).filter((p): p is string => !!p)
 
   const body = await generateDraft(key.provider, key.apiKey, key.model ?? undefined, key.base_url ?? undefined, {
     voiceProfileSample: null,
@@ -148,9 +153,11 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
     companyDescription: account.brand_description,
   })
 
+  const mediaType = nextMediaType(campaign)
+
   let imageDataUrl: string | null = null
   let imagePrompt: string | null = null
-  if (getProvider(key.provider).supportsImages) {
+  if (mediaType === 'image' && getProvider(key.provider).supportsImages) {
     try {
       const { data: links } = await supabase
         .from('campaign_library_images')
@@ -180,6 +187,27 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
     }
   }
 
+  let video: { url: string; thumbnailUrl: string; searchQuery: string; provider: string; providerId: string } | null = null
+  if (mediaType === 'video' && (process.env.PEXELS_API_KEY || process.env.PIXABAY_API_KEY)) {
+    try {
+      const searchQuery = await buildVideoSearchQuery(
+        key.provider,
+        key.apiKey,
+        key.model ?? undefined,
+        key.base_url ?? undefined,
+        topic.topic,
+        body,
+        { description: account.video_style_description, include: account.video_style_include, avoid: account.video_style_avoid },
+        recentVideoQueries,
+      )
+      const candidates = await searchStockVideos(searchQuery, { pexelsApiKey: process.env.PEXELS_API_KEY, pixabayApiKey: process.env.PIXABAY_API_KEY })
+      const picked = selectStockVideo(candidates, recentVideoProviderIds)
+      if (picked) video = { url: picked.videoUrl, thumbnailUrl: picked.thumbnailUrl, searchQuery, provider: picked.provider, providerId: picked.providerId }
+    } catch (err) {
+      console.error('Campaign video search failed:', err)
+    }
+  }
+
   // "Post now" publishes this instant, same as always. An automatic tick
   // instead saves the generated post as `scheduled` for today's post_time -
   // the existing scheduled-posts runner (server/posts.ts) picks it up and
@@ -189,7 +217,23 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
 
   const { data: post, error: insertErr } = await supabase
     .from('posts')
-    .insert({ user_id: campaign.user_id, account_id: account.id, campaign_id: campaign.id, pillar_id: null, topic: topic.topic, body, image_data_url: imageDataUrl, image_prompt: imagePrompt, state: immediate ? 'approved' : 'scheduled', scheduled_at: scheduledAt })
+    .insert({
+      user_id: campaign.user_id,
+      account_id: account.id,
+      campaign_id: campaign.id,
+      pillar_id: null,
+      topic: topic.topic,
+      body,
+      image_data_url: imageDataUrl,
+      image_prompt: imagePrompt,
+      video_url: video?.url ?? null,
+      video_thumbnail_url: video?.thumbnailUrl ?? null,
+      video_search_query: video?.searchQuery ?? null,
+      video_provider: video?.provider ?? null,
+      video_provider_id: video?.providerId ?? null,
+      state: immediate ? 'approved' : 'scheduled',
+      scheduled_at: scheduledAt,
+    })
     .select()
     .single()
   if (insertErr || !post) {
@@ -201,9 +245,18 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
   if (immediate) {
     try {
       const accessToken = await getValidAccessToken(account, supabase)
-      const imageUrn = imageDataUrl ? await uploadImage(accessToken, account.member_sub, imageDataUrl) : null
-      const urn = await publishPost(accessToken, account.member_sub, body, imageUrn)
-      await supabase.from('posts').update({ state: 'published', published_at: new Date().toISOString(), linkedin_post_urn: urn, linkedin_image_urn: imageUrn }).eq('id', post.id)
+      const media = await uploadPostMedia(accessToken, account.member_sub, post)
+      const urn = await publishPost(accessToken, account.member_sub, body, media?.urn)
+      await supabase
+        .from('posts')
+        .update({
+          state: 'published',
+          published_at: new Date().toISOString(),
+          linkedin_post_urn: urn,
+          linkedin_image_urn: media?.kind === 'image' ? media.urn : null,
+          linkedin_video_urn: media?.kind === 'video' ? media.urn : null,
+        })
+        .eq('id', post.id)
       await logDecision(supabase, campaign, `Published to LinkedIn - topic "${topic.topic}".`)
       result = { status: 'posted' }
     } catch (err) {
@@ -217,7 +270,10 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
     result = { status: 'scheduled' }
   }
 
-  await supabase.from('campaigns').update({ last_run_date: today, last_run_at: new Date().toISOString(), next_topic_index: (campaign.next_topic_index + 1) % topics.length }).eq('id', campaign.id)
+  await supabase
+    .from('campaigns')
+    .update({ last_run_date: today, last_run_at: new Date().toISOString(), next_topic_index: (campaign.next_topic_index + 1) % topics.length, last_media_type: mediaType })
+    .eq('id', campaign.id)
   return result
 }
 

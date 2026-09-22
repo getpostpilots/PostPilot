@@ -12,6 +12,8 @@ type NewCampaignInput = {
   postTime: string
   topics: string[]
   imageIds: string[]
+  mediaImage: boolean
+  mediaVideo: boolean
 }
 
 function endDateFor(durationType: NewCampaignInput['durationType'], startDate: Date): string | null {
@@ -85,6 +87,9 @@ export const createCampaign = createServerFn({ method: 'POST' })
         // Demo mode has no real library/Storage to back a picker against -
         // always empty, picker is inert but present.
         campaign_library_images: [] as { image_library_id: string }[],
+        media_image: data.mediaImage,
+        media_video: data.mediaVideo,
+        last_media_type: null as 'image' | 'video' | null,
       }
       demoCampaigns.unshift(campaign)
       logDemo('campaign', 'Campaign created', `"${data.name}" - ${topics.length} topic(s), demo mode (not scheduled for real).`)
@@ -103,6 +108,8 @@ export const createCampaign = createServerFn({ method: 'POST' })
         end_date: endDate,
         days_of_week: data.daysOfWeek,
         post_time: data.postTime,
+        media_image: data.mediaImage,
+        media_video: data.mediaVideo,
       })
       .select()
       .single()
@@ -140,6 +147,8 @@ type EditCampaignInput = {
   postTime: string
   topics: string[]
   imageIds: string[]
+  mediaImage: boolean
+  mediaVideo: boolean
 }
 
 export const updateCampaign = createServerFn({ method: 'POST' })
@@ -166,6 +175,8 @@ export const updateCampaign = createServerFn({ method: 'POST' })
           days_of_week: data.daysOfWeek,
           post_time: data.postTime,
           next_topic_index: 0,
+          media_image: data.mediaImage,
+          media_video: data.mediaVideo,
           ...(restarting ? { status: 'active', last_run_date: null, last_run_at: null } : {}),
         })
         c.campaign_topics = topics.map((topic, i) => ({ id: newDemoId(), topic, order_index: i }))
@@ -193,6 +204,8 @@ export const updateCampaign = createServerFn({ method: 'POST' })
         days_of_week: data.daysOfWeek,
         post_time: data.postTime,
         next_topic_index: 0,
+        media_image: data.mediaImage,
+        media_video: data.mediaVideo,
         ...(restarting ? { status: 'active', last_run_date: null, last_run_at: null } : {}),
       })
       .eq('id', data.campaignId)

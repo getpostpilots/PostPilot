@@ -77,3 +77,30 @@ export const saveBrand = createServerFn({ method: 'POST' })
     if (error) throw new Error(error.message)
     return { ok: true }
   })
+
+// Guided "video style" profile - fed into the stock-search query builder
+// (lib/video-ai.ts) instead of AI-generating video, same account-level
+// pattern as saveBrand.
+export const saveVideoStyle = createServerFn({ method: 'POST' })
+  .validator((data: { accountId: string; description: string; include: string; avoid: string }) => data)
+  .handler(async ({ data }) => {
+    if (DEMO_MODE) {
+      Object.assign(demoAccount, {
+        video_style_description: data.description || null,
+        video_style_include: data.include || null,
+        video_style_avoid: data.avoid || null,
+      })
+      return { ok: true }
+    }
+    const { supabase } = await requireUser()
+    const { error } = await supabase
+      .from('linkedin_accounts')
+      .update({
+        video_style_description: data.description || null,
+        video_style_include: data.include || null,
+        video_style_avoid: data.avoid || null,
+      })
+      .eq('id', data.accountId)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  })

@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { getScheduledPageData } from '../../server/dashboard'
 import { deletePost, publishNow, setPostState, updatePostBody } from '../../server/posts'
+import { regenerateVideo } from '../../server/video-prompts'
 import { postCampaignNowFn } from '../../server/campaigns'
 import { postHeading, postSource } from '../../lib/post-display'
 import { nextRunMinutesFromNow } from '../../lib/timezones'
@@ -165,6 +166,8 @@ function ScheduledPostRow({ post, busy, onBusy }: { post: any; busy: boolean; on
           <summary className="flex cursor-pointer list-none items-center gap-3 p-3 [&::-webkit-details-marker]:hidden">
             {post.image_data_url ? (
               <img src={post.image_data_url} alt="" className="h-10 w-10 shrink-0 rounded border object-cover" />
+            ) : post.video_thumbnail_url ? (
+              <img src={post.video_thumbnail_url} alt="" className="h-10 w-10 shrink-0 rounded border object-cover" />
             ) : (
               <div className="h-10 w-10 shrink-0 rounded border bg-muted" />
             )}
@@ -180,6 +183,20 @@ function ScheduledPostRow({ post, busy, onBusy }: { post: any; busy: boolean; on
           </summary>
           <div className="grid gap-3 border-t p-4">
             {post.image_data_url && <img src={post.image_data_url} alt="" className="max-h-96 w-fit rounded-md border object-cover" />}
+            {post.video_url && (
+              <div className="grid gap-2">
+                <video src={post.video_url} poster={post.video_thumbnail_url ?? undefined} controls className="max-h-96 w-fit rounded-md border" />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-fit"
+                  disabled={busy}
+                  onClick={() => onBusy(() => regenerateVideo({ data: { accountId: post.account_id, postId: post.id } }))}
+                >
+                  Reroll video
+                </Button>
+              </div>
+            )}
             <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4} disabled={busy} />
             <div className="flex flex-wrap items-center gap-2">
               {dirty && (

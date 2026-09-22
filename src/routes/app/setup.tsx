@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { getDashboard } from '../../server/dashboard'
 import { getKeyStatus, killSwitch, removeApiKey, saveApiKey, saveConfig, saveFounderPov, savePillars, saveVoice } from '../../server/settings'
-import { fetchBrandFromWebsite, saveBrand } from '../../server/brand'
+import { fetchBrandFromWebsite, saveBrand, saveVideoStyle } from '../../server/brand'
 import ThemeToggle from '../../components/ThemeToggle'
 import { AI_PROVIDERS, getProvider } from '../../lib/ai-providers'
 import { Button } from '../../components/ui/button'
@@ -75,6 +75,7 @@ function Setup() {
       </Card>
 
       <BrandCard account={account} onSaved={async (msg) => { setMessage(msg); await refresh() }} />
+      <VideoStyleCard account={account} onSaved={async (msg) => { setMessage(msg); await refresh() }} />
       <ApiKeyCard status={keyStatus} onSaved={async (msg) => { setMessage(msg); await refresh() }} />
       <VoiceCard accountId={account.id} voiceProfiles={account.voice_profiles ?? []} onSaved={async (msg) => { setMessage(msg); await refresh() }} />
       <PillarsCard accountId={account.id} pillars={account.content_pillars ?? []} onSaved={async (msg) => { setMessage(msg); await refresh() }} />
@@ -166,6 +167,47 @@ function BrandCard({ account, onSaved }: { account: any; onSaved: (m: string) =>
 
         <Button size="sm" className="w-fit" disabled={busy} onClick={save}>
           Save brand
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+function VideoStyleCard({ account, onSaved }: { account: any; onSaved: (m: string) => void }) {
+  const [description, setDescription] = useState(account.video_style_description ?? '')
+  const [include, setInclude] = useState(account.video_style_include ?? '')
+  const [avoid, setAvoid] = useState(account.video_style_avoid ?? '')
+  const [busy, setBusy] = useState(false)
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">Video style</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        <p className="text-sm text-muted-foreground">
+          Guides the search for stock footage (Pexels + Pixabay) on pillars/campaigns with video turned on - the AI turns each post into a search query following this, instead of guessing.
+        </p>
+        <Textarea placeholder="Desired tone/mood, e.g. clean modern SaaS office energy" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+        <Textarea placeholder="Favor subjects like: office b-roll, product close-ups, city skylines" rows={2} value={include} onChange={(e) => setInclude(e.target.value)} />
+        <Textarea placeholder="Avoid subjects like: people talking to camera, stock-footage clichés" rows={2} value={avoid} onChange={(e) => setAvoid(e.target.value)} />
+        <Button
+          size="sm"
+          className="w-fit"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true)
+            try {
+              await saveVideoStyle({ data: { accountId: account.id, description, include, avoid } })
+              onSaved('Video style saved.')
+            } catch (err) {
+              onSaved(err instanceof Error ? `Failed to save video style: ${err.message}` : 'Failed to save video style.')
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          Save video style
         </Button>
       </CardContent>
     </Card>
@@ -280,13 +322,29 @@ function VoiceCard({ accountId, voiceProfiles, onSaved }: { accountId: string; v
   )
 }
 
-type PillarRow = { name: string; description: string; kind: 'founder' | 'product'; targetShare: number; ctaMechanic: 'discussion' | 'comment_gate' }
+type PillarRow = {
+  name: string
+  description: string
+  kind: 'founder' | 'product'
+  targetShare: number
+  ctaMechanic: 'discussion' | 'comment_gate'
+  mediaImage: boolean
+  mediaVideo: boolean
+}
 
 function PillarsCard({ accountId, pillars, onSaved }: { accountId: string; pillars: any[]; onSaved: (m: string) => void }) {
   const [rows, setRows] = useState<PillarRow[]>(
     pillars.length
-      ? pillars.map((p) => ({ name: p.name, description: p.description, kind: p.kind, targetShare: Number(p.target_share), ctaMechanic: p.cta_mechanic }))
-      : [{ name: '', description: '', kind: 'founder', targetShare: 0.5, ctaMechanic: 'discussion' }],
+      ? pillars.map((p) => ({
+          name: p.name,
+          description: p.description,
+          kind: p.kind,
+          targetShare: Number(p.target_share),
+          ctaMechanic: p.cta_mechanic,
+          mediaImage: p.media_image ?? true,
+          mediaVideo: p.media_video ?? false,
+        }))
+      : [{ name: '', description: '', kind: 'founder', targetShare: 0.5, ctaMechanic: 'discussion', mediaImage: true, mediaVideo: false }],
   )
   const [busy, setBusy] = useState(false)
   const founderShare = rows.filter((r) => r.kind === 'founder').reduce((s, r) => s + (r.targetShare || 0), 0)
@@ -325,13 +383,33 @@ function PillarsCard({ accountId, pillars, onSaved }: { accountId: string; pilla
               <Button variant="ghost" size="sm" onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))}>Remove</Button>
             </div>
             <Textarea placeholder="What this pillar argues, and who it's for" value={row.description} onChange={(e) => update(i, { description: e.target.value })} />
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-muted-foreground">Generate:</span>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={row.mediaImage}
+                  onChange={(e) => (e.target.checked || row.mediaVideo) && update(i, { mediaImage: e.target.checked })}
+                />
+                Image
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={row.mediaVideo}
+                  onChange={(e) => (e.target.checked || row.mediaImage) && update(i, { mediaVideo: e.target.checked })}
+                />
+                Video
+              </label>
+              {row.mediaImage && row.mediaVideo && <span className="text-xs text-muted-foreground">(alternates image/video each post)</span>}
+            </div>
           </div>
         ))}
         <div className="flex gap-2">
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setRows((rs) => [...rs, { name: '', description: '', kind: 'founder', targetShare: 0, ctaMechanic: 'discussion' }])}
+            onClick={() => setRows((rs) => [...rs, { name: '', description: '', kind: 'founder', targetShare: 0, ctaMechanic: 'discussion', mediaImage: true, mediaVideo: false }])}
           >
             Add pillar
           </Button>

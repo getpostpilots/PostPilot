@@ -87,6 +87,8 @@ function PublishedRow({ post }: { post: any }) {
           <summary className="flex cursor-pointer list-none items-center gap-3 p-3 [&::-webkit-details-marker]:hidden">
             {post.image_data_url ? (
               <img src={post.image_data_url} alt="" className="h-10 w-10 shrink-0 rounded border object-cover" />
+            ) : post.video_thumbnail_url ? (
+              <img src={post.video_thumbnail_url} alt="" className="h-10 w-10 shrink-0 rounded border object-cover" />
             ) : (
               <div className="h-10 w-10 shrink-0 rounded border bg-muted" />
             )}
@@ -101,6 +103,7 @@ function PublishedRow({ post }: { post: any }) {
           </summary>
           <div className="grid gap-3 border-t p-4">
             {post.image_data_url && <img src={post.image_data_url} alt="" className="max-h-96 w-fit rounded-md border object-cover" />}
+            {post.video_url && <video src={post.video_url} poster={post.video_thumbnail_url ?? undefined} controls className="max-h-96 w-fit rounded-md border" />}
             <p className="whitespace-pre-wrap text-sm">{post.body}</p>
             {post.linkedin_post_urn && <p className="text-xs text-muted-foreground">LinkedIn URN: {post.linkedin_post_urn}</p>}
           </div>

@@ -81,6 +81,15 @@ furthest under its `target_share` among published posts.
 `publishPost()` (LinkedIn Posts API), and writes a `decision_logs` row either
 way — success or failure, so the audit trail never has a gap.
 
+**Video posts.** Checkboxes on a pillar (manual generation) or a campaign
+(automatic ticks) pick image, video, or both - `server/media-type.ts`'s
+`nextMediaType` alternates when both are checked, tracked via the row's own
+`last_media_type`. Video isn't AI-generated: `lib/video-ai.ts` turns the post
++ the account's "video style" profile (Setup) into a short search query,
+`lib/video-search.ts` pools results from Pexels + Pixabay, and the top match
+gets uploaded to LinkedIn via `lib/linkedin.ts`'s `uploadVideo` (a real
+multi-part flow, unlike the single-PUT image upload).
+
 **Safety rails currently wired up:**
 - Kill switch (`linkedin_accounts.kill_switch_engaged`) — `publishNow` refuses if set
 - Full audit trail (`decision_logs`) — every generate/edit/approve/schedule/publish/pause writes a row
@@ -130,8 +139,10 @@ audit rather than building them speculatively:
 
 ## Setup to actually run this
 
-1. Create a Supabase project, run `supabase/migrations/0001_init.sql` against it.
-2. Copy `.env.example` to `.env`, fill in the Supabase URL/keys.
+1. Create a Supabase project, run every file in `supabase/migrations/` against
+   it, in order (`0001_init.sql` through the latest).
+2. Copy `.env.example` to `.env`, fill in the Supabase URL/keys. `PEXELS_API_KEY`
+   / `PIXABAY_API_KEY` are optional - only needed for video-enabled pillars/campaigns.
 3. Generate an encryption key: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
 4. Create a LinkedIn app at developer.linkedin.com, add "Sign In with LinkedIn
    using OpenID Connect" + "Share on LinkedIn" products, set the redirect URL
