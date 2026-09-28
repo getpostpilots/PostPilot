@@ -31,8 +31,12 @@ export async function buildVideoSearchQuery(
   style: VideoStyle | undefined,
   recentQueries: string[] = [],
 ): Promise<string> {
-  const text = await completeText(providerId, apiKey, model, baseUrlOverride, queryPrompt(topic, postBody, style, recentQueries), 30)
-  return text.replace(/["'.]/g, '').trim() || topic
+  // 30 tokens was too tight - a stray reasoning token or two left no room
+  // for the actual query, and the fallback below then searched stock video
+  // APIs on the *entire* topic sentence instead of a short phrase.
+  const text = await completeText(providerId, apiKey, model, baseUrlOverride, queryPrompt(topic, postBody, style, recentQueries), 80)
+  const cleaned = text.replace(/["'.]/g, '').trim()
+  return cleaned || topic.split(/\s+/).slice(0, 6).join(' ')
 }
 
 // The whole "matching" logic: take the first pooled candidate not already
