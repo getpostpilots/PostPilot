@@ -1,13 +1,14 @@
 import { completeText } from './ai'
-import type { StockVideoCandidate } from './video-search'
+import { searchStockVideos, type StockVideoCandidate } from './video-search'
 
 export type VideoStyle = { description?: string | null; include?: string | null; avoid?: string | null }
 
 function queryPrompt(topic: string, postBody: string, style: VideoStyle | undefined, recentQueries: string[]): string {
   return [
-    'Turn this into a short stock-video search query: 3-6 words, no punctuation, no quotes, output only the query text and nothing else.',
+    'Write a stock-video search query for a LinkedIn post: 3-6 words, no punctuation, no quotes, output only the query text and nothing else.',
+    'Describe a concrete, literal, visually striking scene that a camera can film (people in action, real environments, dynamic movement) that works as a metaphor for the post. Never abstract concepts, never generic office or handshake footage.',
     `Post topic: ${topic}`,
-    `Post content for context: ${postBody.slice(0, 300)}`,
+    `Post content for context: ${postBody.slice(0, 600)}`,
     style?.description ? `Desired style/mood: ${style.description}` : '',
     style?.include ? `Favor subjects like: ${style.include}` : '',
     style?.avoid ? `Avoid subjects like: ${style.avoid}` : '',
@@ -45,4 +46,54 @@ export async function buildVideoSearchQuery(
 export function selectStockVideo(candidates: StockVideoCandidate[], recentProviderIds: string[]): StockVideoCandidate | null {
   if (candidates.length === 0) return null
   return candidates.find((c) => !recentProviderIds.includes(c.providerId)) ?? candidates[0]
+}
+
+// Asks the model to choose the clip that best fits the post from the pooled
+// candidates' descriptions; any bad answer falls back to selectStockVideo.
+async function pickBestFit(
+  key: ApiKey,
+  topic: string,
+  postBody: string,
+  candidates: StockVideoCandidate[],
+  recentProviderIds: string[],
+): Promise<StockVideoCandidate | null> {
+  const fresh = candidates.filter((c) => !recentProviderIds.includes(c.providerId)).slice(0, 12)
+  if (fresh.length < 2) return selectStockVideo(candidates, recentProviderIds)
+  const list = fresh.map((c, i) => `${i + 1}. ${c.description || 'no description'}`).join('\n')
+  try {
+    const text = await completeText(
+      key.provider,
+      key.apiKey,
+      key.model,
+      key.baseUrl,
+      `Pick the stock video that best fits this LinkedIn post and would stop a scroll. Reply with only the number.
+Post topic: ${topic}
+Post: ${postBody.slice(0, 600)}
+Clips:
+${list}`,
+      80,
+    )
+    const n = parseInt(text.match(/\d+/)?.[0] ?? '', 10)
+    if (n >= 1 && n <= fresh.length) return fresh[n - 1]
+  } catch {}
+  return selectStockVideo(candidates, recentProviderIds)
+}
+
+type ApiKey = { provider: string; apiKey: string; model?: string; baseUrl?: string }
+
+// The single entry point all three call sites (generation, campaign engine,
+// reroll) use: build query, search, AI-pick. Returns null when nothing usable
+// was found, and throws on API failure so callers can log why.
+export async function findStockVideo(
+  key: ApiKey,
+  topic: string,
+  postBody: string,
+  style: VideoStyle | undefined,
+  recentQueries: string[],
+  recentProviderIds: string[],
+): Promise<{ searchQuery: string; picked: StockVideoCandidate } | null> {
+  const searchQuery = await buildVideoSearchQuery(key.provider, key.apiKey, key.model, key.baseUrl, topic, postBody, style, recentQueries)
+  const candidates = await searchStockVideos(searchQuery, { pexelsApiKey: process.env.PEXELS_API_KEY, pixabayApiKey: process.env.PIXABAY_API_KEY })
+  const picked = await pickBestFit(key, topic, postBody, candidates, recentProviderIds)
+  return picked ? { searchQuery, picked } : null
 }

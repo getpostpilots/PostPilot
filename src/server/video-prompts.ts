@@ -1,7 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import { requireUser } from '../lib/supabase-server'
-import { buildVideoSearchQuery, selectStockVideo } from '../lib/video-ai'
-import { searchStockVideos } from '../lib/video-search'
+import { findStockVideo } from '../lib/video-ai'
 import { resolveApiKey } from './settings'
 import { DEMO_MODE } from '../lib/demo-mode'
 import { demoPosts, logDemo } from '../lib/demo-data'
@@ -32,19 +31,16 @@ export const regenerateVideo = createServerFn({ method: 'POST' })
     if (!key) throw new Error('Add an AI provider key in Setup before generating.')
 
     const excludeIds = post.video_provider_id ? [post.video_provider_id] : []
-    const searchQuery = await buildVideoSearchQuery(
-      key.provider,
-      key.apiKey,
-      key.model ?? undefined,
-      key.base_url ?? undefined,
+    const found = await findStockVideo(
+      { provider: key.provider, apiKey: key.apiKey, model: key.model ?? undefined, baseUrl: key.base_url ?? undefined },
       post.topic ?? post.body.slice(0, 60),
       post.body,
       { description: account.video_style_description, include: account.video_style_include, avoid: account.video_style_avoid },
       post.video_search_query ? [post.video_search_query] : [],
+      excludeIds,
     )
-    const candidates = await searchStockVideos(searchQuery, { pexelsApiKey: process.env.PEXELS_API_KEY, pixabayApiKey: process.env.PIXABAY_API_KEY })
-    const picked = selectStockVideo(candidates, excludeIds)
-    if (!picked) throw new Error('No stock video found for that search - try again in a moment.')
+    if (!found) throw new Error('No stock video found for that search - try again in a moment.')
+    const { picked, searchQuery } = found
 
     const { error } = await supabase
       .from('posts')
