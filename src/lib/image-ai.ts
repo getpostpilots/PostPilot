@@ -33,6 +33,23 @@ export async function generateImage(apiKey: string, prompt: string, referenceIma
   return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`
 }
 
+// Image is mandatory for image posts, so retry: the same request twice (Gemini
+// is flaky/rate-limited), then once without reference images (they are the
+// usual cause of a refusal). Throws with the last reason if all three fail.
+export async function generateImageReliably(apiKey: string, prompt: string, referenceImages: string[] = []): Promise<string> {
+  let lastError = 'model returned no image'
+  for (const refs of [referenceImages, referenceImages, []]) {
+    try {
+      const img = await generateImage(apiKey, prompt, refs)
+      if (img) return img
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err)
+    }
+    await new Promise((r) => setTimeout(r, 1500))
+  }
+  throw new Error(`Image generation failed after 3 attempts: ${lastError}`)
+}
+
 // Shared between imagePromptFor and campaignImagePromptFor - reference
 // images should steer subject matter too (people or not, abstract vs.
 // product shots), not just palette/tone, or generation defaults to a

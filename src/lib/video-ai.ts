@@ -82,8 +82,9 @@ ${list}`,
 type ApiKey = { provider: string; apiKey: string; model?: string; baseUrl?: string }
 
 // The single entry point all three call sites (generation, campaign engine,
-// reroll) use: build query, search, AI-pick. Returns null when nothing usable
-// was found, and throws on API failure so callers can log why.
+// reroll) use: build query, search, AI-pick. Media is mandatory, so it walks a
+// ladder of progressively simpler queries (each strict, then relaxed on clip
+// length) and only throws when every rung came back empty.
 export async function findStockVideo(
   key: ApiKey,
   topic: string,
@@ -91,9 +92,31 @@ export async function findStockVideo(
   style: VideoStyle | undefined,
   recentQueries: string[],
   recentProviderIds: string[],
-): Promise<{ searchQuery: string; picked: StockVideoCandidate } | null> {
-  const searchQuery = await buildVideoSearchQuery(key.provider, key.apiKey, key.model, key.baseUrl, topic, postBody, style, recentQueries)
-  const candidates = await searchStockVideos(searchQuery, { pexelsApiKey: process.env.PEXELS_API_KEY, pixabayApiKey: process.env.PIXABAY_API_KEY })
-  const picked = await pickBestFit(key, topic, postBody, candidates, recentProviderIds)
-  return picked ? { searchQuery, picked } : null
+): Promise<{ searchQuery: string; picked: StockVideoCandidate }> {
+  if (!process.env.PEXELS_API_KEY && !process.env.PIXABAY_API_KEY) throw new Error('No PEXELS_API_KEY or PIXABAY_API_KEY is set on the server.')
+  const keys = { pexelsApiKey: process.env.PEXELS_API_KEY, pixabayApiKey: process.env.PIXABAY_API_KEY }
+
+  let aiQuery = ''
+  try {
+    aiQuery = await buildVideoSearchQuery(key.provider, key.apiKey, key.model, key.baseUrl, topic, postBody, style, recentQueries)
+  } catch (err) {
+    console.error('Video query generation failed, using fallbacks:', err)
+  }
+  const words = (t: string, n: number) => t.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(Boolean).slice(0, n).join(' ')
+  const ladder = [aiQuery, words(aiQuery, 3), words(topic, 4), words(style?.include ?? '', 3), 'business team working', 'city skyline', 'people talking']
+  const queries = [...new Set(ladder.filter(Boolean))]
+
+  let lastError: unknown
+  for (const searchQuery of queries) {
+    for (const relaxed of [false, true]) {
+      try {
+        const candidates = await searchStockVideos(searchQuery, keys, 15, relaxed)
+        const picked = await pickBestFit(key, topic, postBody, candidates, recentProviderIds)
+        if (picked) return { searchQuery, picked }
+      } catch (err) {
+        lastError = err
+      }
+    }
+  }
+  throw new Error(`No stock video found after ${queries.length} queries${lastError instanceof Error ? `: ${lastError.message}` : ''}`)
 }

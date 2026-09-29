@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '../lib/supabase-server'
 import { generateDraft } from '../lib/ai'
-import { generateImage, campaignImagePromptFor, fetchImageAsDataUrl } from '../lib/image-ai'
+import { generateImageReliably, campaignImagePromptFor, fetchImageAsDataUrl } from '../lib/image-ai'
 import { findStockVideo } from '../lib/video-ai'
 import { getProvider } from '../lib/ai-providers'
 import { resolveApiKey } from './settings'
@@ -154,10 +154,15 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
 
   const mediaType = nextMediaType(campaign)
 
+  // Media is mandatory: if it can't be produced after retries/fallbacks the run
+  // fails (topic not advanced, so the next tick retries) rather than posting
+  // text-only.
   let imageDataUrl: string | null = null
   let imagePrompt: string | null = null
-  if (mediaType === 'image' && getProvider(key.provider).supportsImages) {
-    try {
+  let video: { url: string; thumbnailUrl: string; searchQuery: string; provider: string; providerId: string } | null = null
+  try {
+    if (mediaType === 'image') {
+      if (!getProvider(key.provider).supportsImages) throw new Error(`${getProvider(key.provider).label} can't generate images. Switch to Gemini in Setup or uncheck Image on this campaign.`)
       const { data: links } = await supabase
         .from('campaign_library_images')
         .select('image_library(id, url, storage_path)')
@@ -170,7 +175,7 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
         .slice(0, 3) // was 2 - generateImage caps at 3, match it so refs are fully used
       const signedUrls = await resolveImageUrls(supabase, picked)
       const referenceDataUrls = (
-        await Promise.all(picked.map((p: any) => fetchImageAsDataUrl(signedUrls.get(p.id) ?? '')))
+        await Promise.all(picked.map((p: any) => fetchImageAsDataUrl(signedUrls.get(p.id) ?? '').catch(() => null)))
       ).filter((u): u is string => !!u)
 
       imagePrompt = campaignImagePromptFor(
@@ -180,36 +185,24 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
         recentImagePrompts,
         referenceDataUrls.length > 0,
       )
-      imageDataUrl = await generateImage(key.apiKey, imagePrompt, referenceDataUrls)
-    } catch (err) {
-      console.error('Campaign image generation failed:', err)
+      imageDataUrl = await generateImageReliably(key.apiKey, imagePrompt, referenceDataUrls)
+    } else {
+      const found = await findStockVideo(
+        { provider: key.provider, apiKey: key.apiKey, model: key.model ?? undefined, baseUrl: key.base_url ?? undefined },
+        topic.topic,
+        body,
+        { description: account.video_style_description, include: account.video_style_include, avoid: account.video_style_avoid },
+        recentVideoQueries,
+        recentVideoProviderIds,
+      )
+      video = { url: found.picked.videoUrl, thumbnailUrl: found.picked.thumbnailUrl, searchQuery: found.searchQuery, provider: found.picked.provider, providerId: found.picked.providerId }
     }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`Campaign ${mediaType} failed:`, err)
+    await logDecision(supabase, campaign, `Not posted - required ${mediaType} could not be produced: ${message}`, 'error')
+    return { status: 'failed', reason: message }
   }
-
-  let video: { url: string; thumbnailUrl: string; searchQuery: string; provider: string; providerId: string } | null = null
-  let mediaNote: string | null = null
-  if (mediaType === 'video') {
-    if (!process.env.PEXELS_API_KEY && !process.env.PIXABAY_API_KEY) mediaNote = 'no PEXELS_API_KEY/PIXABAY_API_KEY set on the server'
-    else {
-      try {
-        const found = await findStockVideo(
-          { provider: key.provider, apiKey: key.apiKey, model: key.model ?? undefined, baseUrl: key.base_url ?? undefined },
-          topic.topic,
-          body,
-          { description: account.video_style_description, include: account.video_style_include, avoid: account.video_style_avoid },
-          recentVideoQueries,
-          recentVideoProviderIds,
-        )
-        if (found) video = { url: found.picked.videoUrl, thumbnailUrl: found.picked.thumbnailUrl, searchQuery: found.searchQuery, provider: found.picked.provider, providerId: found.picked.providerId }
-        else mediaNote = 'stock search returned no usable clips'
-      } catch (err) {
-        console.error('Campaign video search failed:', err)
-        mediaNote = `video search error: ${err instanceof Error ? err.message : err}`
-      }
-    }
-  }
-  if (mediaType === 'image' && !imageDataUrl && !mediaNote) mediaNote = 'image generation returned nothing (see server logs)'
-  if (mediaNote) await logDecision(supabase, campaign, `Post has no ${mediaType}: ${mediaNote}.`, 'warn')
 
   // "Post now" publishes this instant, same as always. An automatic tick
   // instead saves the generated post as `scheduled` for today's post_time -
