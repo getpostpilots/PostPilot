@@ -128,39 +128,68 @@ export async function renderCarouselPdf(c: Carousel, brand?: { primary?: string 
   const dark = rgb(0.09, 0.1, 0.13)
   const muted = rgb(0.32, 0.35, 0.4)
   const total = c.slides.length + 2
+  const textW = W - MARGIN * 2
+  type Page = ReturnType<typeof pdf.addPage>
+  type Fit = ReturnType<typeof fit>
 
-  const drawBlock = (page: ReturnType<typeof pdf.addPage>, text: string, font: PDFFont, top: number, max: number, min: number, maxHeight: number, color: ReturnType<typeof rgb>) => {
-    const { size, lines } = fit(text, font, max, min, W - MARGIN * 2, maxHeight)
+  const height = (f: Fit) => f.lines.length * f.size * 1.25
+  // Draws pre-fitted lines from `top` (distance from the page top); returns the bottom edge.
+  const drawLines = (page: Page, f: Fit, font: PDFFont, top: number, color: ReturnType<typeof rgb>) => {
     let y = H - top
-    for (const line of lines) {
-      y -= size
-      page.drawText(line, { x: MARGIN, y, size, font, color })
-      y -= size * 0.25
+    for (const line of f.lines) {
+      y -= f.size
+      page.drawText(line, { x: MARGIN, y, size: f.size, font, color })
+      y -= f.size * 0.25
     }
-    return H - y // bottom edge from top
+    return H - y
+  }
+  // Thin progress bar instead of page numbers, so there is one numbering system (the idea number).
+  const progress = (page: Page, index: number, track: ReturnType<typeof rgb>, fill: ReturnType<typeof rgb>) => {
+    page.drawRectangle({ x: MARGIN, y: 90, width: textW, height: 8, color: track })
+    page.drawRectangle({ x: MARGIN, y: 90, width: (textW * (index + 1)) / total, height: 8, color: fill })
+  }
+  // Swipe cue: label plus a drawn arrow (standard fonts have no arrow glyph).
+  const swipeCue = (page: Page, color: ReturnType<typeof rgb>) => {
+    page.drawText('Swipe', { x: MARGIN, y: 130, size: 46, font: bold, color })
+    const x0 = MARGIN + 170, y0 = 148
+    const opts = { thickness: 6, color }
+    page.drawLine({ start: { x: x0, y: y0 }, end: { x: x0 + 90, y: y0 }, ...opts })
+    page.drawLine({ start: { x: x0 + 90, y: y0 }, end: { x: x0 + 68, y: y0 + 20 }, ...opts })
+    page.drawLine({ start: { x: x0 + 90, y: y0 }, end: { x: x0 + 68, y: y0 - 20 }, ...opts })
   }
 
-  // Cover: brand background, big benefit headline, curiosity nudge. No logo/branding.
+  // Cover: brand background, very large benefit headline, swipe cue. No logo/branding.
   const cover = pdf.addPage([W, H])
   cover.drawRectangle({ x: 0, y: 0, width: W, height: H, color: primary })
-  drawBlock(cover, c.title, bold, 380, 96, 56, 620, onPrimary)
-  cover.drawRectangle({ x: MARGIN, y: 210, width: 140, height: 10, color: accent })
-  cover.drawText('Swipe', { x: MARGIN, y: 140, size: 40, font: regular, color: onPrimary })
+  const cf = fit(c.title, bold, 124, 64, textW, 760)
+  const cTop = Math.max(200, (H - height(cf)) / 2 - 60)
+  const cBottom = drawLines(cover, cf, bold, cTop, onPrimary)
+  cover.drawRectangle({ x: MARGIN, y: H - cBottom - 60, width: 160, height: 12, color: accent })
+  swipeCue(cover, onPrimary)
 
   c.slides.forEach((s, i) => {
     const page = pdf.addPage([W, H])
     page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: rgb(0.973, 0.98, 0.988) })
     page.drawRectangle({ x: 0, y: H - 24, width: W, height: 24, color: primary })
-    page.drawText(`${String(i + 1).padStart(2, '0')}`, { x: MARGIN, y: H - 210, size: 120, font: bold, color: accent })
-    const bottom = drawBlock(page, s.heading, bold, 300, 88, 52, 340, dark)
-    if (s.body) drawBlock(page, s.body, regular, bottom + 40, 54, 36, H - bottom - 40 - 200, muted)
-    page.drawText(`${i + 2} / ${total}`, { x: W - MARGIN - 110, y: 80, size: 30, font: regular, color: muted })
+    page.drawText(String(i + 1).padStart(2, '0'), { x: MARGIN, y: H - 200, size: 120, font: bold, color: accent })
+    // Larger type, block centred in the space under the idea number so slides use the whole screen.
+    const hf = fit(s.heading, bold, 108, 56, textW, 440)
+    const gap = s.body ? 52 : 0
+    // Body gets whatever room is left above the progress bar, shrinking (down to 28pt) rather than overflowing.
+    const bf = s.body ? fit(s.body, regular, 62, 28, textW, H - 170 - 300 - height(hf) - gap) : null
+    const block = height(hf) + gap + (bf ? height(bf) : 0)
+    const top = Math.max(300, Math.min((H - 300 - block) / 2 + 250, H - 170 - block))
+    const bottom = drawLines(page, hf, bold, top, dark)
+    if (bf) drawLines(page, bf, regular, bottom + gap, muted)
+    progress(page, i + 1, rgb(0.86, 0.88, 0.91), primary)
   })
 
   const last = pdf.addPage([W, H])
   last.drawRectangle({ x: 0, y: 0, width: W, height: H, color: primary })
-  drawBlock(last, c.cta, bold, 460, 80, 48, 520, onPrimary)
-  last.drawRectangle({ x: MARGIN, y: 300, width: 140, height: 10, color: accent })
+  const lf = fit(c.cta, bold, 100, 56, textW, 620)
+  const lTop = Math.max(200, (H - height(lf)) / 2 - 40)
+  const lBottom = drawLines(last, lf, bold, lTop, onPrimary)
+  last.drawRectangle({ x: MARGIN, y: H - lBottom - 60, width: 160, height: 12, color: accent })
 
   return pdf.save()
 }
