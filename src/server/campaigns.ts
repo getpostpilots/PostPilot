@@ -14,6 +14,7 @@ type NewCampaignInput = {
   imageIds: string[]
   mediaImage: boolean
   mediaVideo: boolean
+  mediaDocument?: boolean
 }
 
 function endDateFor(durationType: NewCampaignInput['durationType'], startDate: Date): string | null {
@@ -89,6 +90,7 @@ export const createCampaign = createServerFn({ method: 'POST' })
         campaign_library_images: [] as { image_library_id: string }[],
         media_image: data.mediaImage,
         media_video: data.mediaVideo,
+        media_document: data.mediaDocument ?? false,
         last_media_type: null as 'image' | 'video' | null,
       }
       demoCampaigns.unshift(campaign)
@@ -110,6 +112,7 @@ export const createCampaign = createServerFn({ method: 'POST' })
         post_time: data.postTime,
         media_image: data.mediaImage,
         media_video: data.mediaVideo,
+        media_document: data.mediaDocument ?? false,
       })
       .select()
       .single()
@@ -149,6 +152,7 @@ type EditCampaignInput = {
   imageIds: string[]
   mediaImage: boolean
   mediaVideo: boolean
+  mediaDocument?: boolean
 }
 
 export const updateCampaign = createServerFn({ method: 'POST' })
@@ -177,6 +181,7 @@ export const updateCampaign = createServerFn({ method: 'POST' })
           next_topic_index: 0,
           media_image: data.mediaImage,
           media_video: data.mediaVideo,
+          media_document: data.mediaDocument ?? false,
           ...(restarting ? { status: 'active', last_run_date: null, last_run_at: null } : {}),
         })
         c.campaign_topics = topics.map((topic, i) => ({ id: newDemoId(), topic, order_index: i }))
@@ -206,6 +211,7 @@ export const updateCampaign = createServerFn({ method: 'POST' })
         next_topic_index: 0,
         media_image: data.mediaImage,
         media_video: data.mediaVideo,
+        media_document: data.mediaDocument ?? false,
         ...(restarting ? { status: 'active', last_run_date: null, last_run_at: null } : {}),
       })
       .eq('id', data.campaignId)

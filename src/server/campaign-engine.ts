@@ -2,6 +2,9 @@ import { supabaseAdmin } from '../lib/supabase-server'
 import { generateDraft } from '../lib/ai'
 import { generateImageReliably, campaignImagePromptFor, fetchImageAsDataUrl } from '../lib/image-ai'
 import { findStockVideo } from '../lib/video-ai'
+import { generateCarousel } from '../lib/carousel'
+import { chooseStructure, computeInsights, learningsPrompt, loadResults } from '../lib/learning'
+import { insertPost } from './insert-post'
 import { getProvider } from '../lib/ai-providers'
 import { resolveApiKey } from './settings'
 import { publishPost, uploadPostMedia } from '../lib/linkedin'
@@ -140,20 +143,27 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
   const recentVideoQueries = (priorPosts ?? []).map((p) => p.video_search_query).filter((p): p is string => !!p)
   const recentVideoProviderIds = (priorPosts ?? []).map((p) => p.video_provider_id).filter((p): p is string => !!p)
 
-  const body = await generateDraft(key.provider, key.apiKey, key.model ?? undefined, key.base_url ?? undefined, {
+  const mediaType = nextMediaType(campaign)
+  const results = await loadResults(supabase, account.id)
+  const insights = computeInsights(results)
+  const structure = chooseStructure(results, insights)
+  const ctx = {
     voiceProfileSample: null,
     pillarName: topic.topic,
     pillarDescription: `Campaign topic: ${topic.topic}`,
-    pillarKind: 'product',
+    pillarKind: 'product' as const,
     founderBeliefs: [],
     primaryAudience: account.primary_audience,
-    ctaMechanic: 'discussion',
+    ctaMechanic: 'discussion' as const,
     recentPosts: recentBodies,
     companyDescription: account.brand_description,
     customRules: account.ai_training,
-  })
-
-  const mediaType = nextMediaType(campaign)
+    structure,
+    learnings: learningsPrompt(insights),
+  }
+  // A carousel writes its own short caption + slides; everything else is a full text post.
+  const carousel = mediaType === 'document' ? await generateCarousel(key.provider, key.apiKey, key.model ?? undefined, key.base_url ?? undefined, ctx) : null
+  const body = carousel ? carousel.caption : await generateDraft(key.provider, key.apiKey, key.model ?? undefined, key.base_url ?? undefined, ctx)
 
   // Media is mandatory: if it can't be produced after retries/fallbacks the run
   // fails (topic not advanced, so the next tick retries) rather than posting
@@ -187,7 +197,7 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
         referenceDataUrls.length > 0,
       )
       imageDataUrl = await generateImageReliably(key.apiKey, imagePrompt, referenceDataUrls)
-    } else {
+    } else if (mediaType === 'video') {
       const found = await findStockVideo(
         { provider: key.provider, apiKey: key.apiKey, model: key.model ?? undefined, baseUrl: key.base_url ?? undefined },
         topic.topic,
@@ -212,9 +222,9 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
   const immediate = !!opts.skipScheduleGate
   const scheduledAt = immediate ? null : zonedTimeToUtcIso(account.timezone || 'UTC', today, campaign.post_time)
 
-  const { data: post, error: insertErr } = await supabase
-    .from('posts')
-    .insert({
+  const { data: post, error: insertErr } = await insertPost(
+    supabase,
+    {
       user_id: campaign.user_id,
       account_id: account.id,
       campaign_id: campaign.id,
@@ -230,9 +240,13 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
       video_provider_id: video?.providerId ?? null,
       state: immediate ? 'approved' : 'scheduled',
       scheduled_at: scheduledAt,
-    })
-    .select()
-    .single()
+    },
+    {
+      structure: carousel ? 'carousel' : structure.id,
+      document_title: carousel?.title ?? null,
+      document_slides: carousel ? { slides: carousel.slides, cta: carousel.cta } : null,
+    },
+  )
   if (insertErr || !post) {
     await logDecision(supabase, campaign, `Failed to save generated post: ${insertErr?.message}`, 'error')
     return { status: 'failed', reason: `Failed to save generated post: ${insertErr?.message}` }
@@ -242,8 +256,8 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
   if (immediate) {
     try {
       const accessToken = await getValidAccessToken(account, supabase)
-      const media = await uploadPostMedia(accessToken, account.member_sub, post)
-      const urn = await publishPost(accessToken, account.member_sub, body, media?.urn)
+      const media = await uploadPostMedia(accessToken, account.member_sub, post, { primary: account.brand_primary_color, secondary: account.brand_secondary_color })
+      const urn = await publishPost(accessToken, account.member_sub, body, media)
       await supabase
         .from('posts')
         .update({

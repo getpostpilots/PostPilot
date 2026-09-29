@@ -27,6 +27,7 @@ type CampaignFormValues = {
   imageIds: string[]
   mediaImage: boolean
   mediaVideo: boolean
+  mediaDocument: boolean
 }
 
 function Campaigns() {
@@ -115,6 +116,7 @@ function Campaigns() {
                     imageIds: values.imageIds,
                     mediaImage: values.mediaImage,
                     mediaVideo: values.mediaVideo,
+                    mediaDocument: values.mediaDocument,
                   },
                 })
                 setShowForm(false)
@@ -177,6 +179,7 @@ function CampaignRow({
               imageIds: images.map((i: any) => i.image_library_id),
               mediaImage: campaign.media_image ?? true,
               mediaVideo: campaign.media_video ?? false,
+              mediaDocument: campaign.media_document ?? false,
             }}
             onSubmit={async (values) => {
               await updateCampaign({
@@ -190,6 +193,7 @@ function CampaignRow({
                   imageIds: values.imageIds,
                   mediaImage: values.mediaImage,
                   mediaVideo: values.mediaVideo,
+                  mediaDocument: values.mediaDocument,
                 },
               })
               setEditing(false)
@@ -275,6 +279,7 @@ function CampaignForm({
   const [imageIds, setImageIds] = useState<string[]>(initial?.imageIds ?? [])
   const [mediaImage, setMediaImage] = useState(initial?.mediaImage ?? true)
   const [mediaVideo, setMediaVideo] = useState(initial?.mediaVideo ?? false)
+  const [mediaDocument, setMediaDocument] = useState(initial?.mediaDocument ?? false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -290,7 +295,7 @@ function CampaignForm({
     setBusy(true)
     setError('')
     try {
-      await onSubmit({ name, durationType, days, postTime, topics, imageIds, mediaImage, mediaVideo })
+      await onSubmit({ name, durationType, days, postTime, topics, imageIds, mediaImage, mediaVideo, mediaDocument })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save campaign.')
     } finally {
@@ -338,14 +343,18 @@ function CampaignForm({
       <Label>Generate</Label>
       <div className="flex items-center gap-4 text-sm">
         <label className="flex items-center gap-1.5">
-          <input type="checkbox" checked={mediaImage} onChange={(e) => (e.target.checked || mediaVideo) && setMediaImage(e.target.checked)} />
+          <input type="checkbox" checked={mediaImage} onChange={(e) => (e.target.checked || mediaVideo || mediaDocument) && setMediaImage(e.target.checked)} />
           Image
         </label>
         <label className="flex items-center gap-1.5">
-          <input type="checkbox" checked={mediaVideo} onChange={(e) => (e.target.checked || mediaImage) && setMediaVideo(e.target.checked)} />
+          <input type="checkbox" checked={mediaVideo} onChange={(e) => (e.target.checked || mediaImage || mediaDocument) && setMediaVideo(e.target.checked)} />
           Video
         </label>
-        {mediaImage && mediaVideo && <span className="text-xs text-muted-foreground">(alternates image/video each post)</span>}
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={mediaDocument} onChange={(e) => (e.target.checked || mediaImage || mediaVideo) && setMediaDocument(e.target.checked)} />
+          Carousel (PDF)
+        </label>
+        {[mediaImage, mediaVideo, mediaDocument].filter(Boolean).length > 1 && <span className="text-xs text-muted-foreground">(rotates between the checked types each post)</span>}
       </div>
 
       <Label>Inspiration images (optional) - style reference from your image library, never reproduced as-is</Label>

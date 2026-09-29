@@ -1,3 +1,4 @@
+import { renderCarouselPdf, type Carousel } from './carousel'
 // Server-only: LinkedIn OAuth (OpenID Connect) + the Posts/Images APIs.
 // Requires a LinkedIn app with the "Sign In with LinkedIn using OpenID Connect"
 // and "Share on LinkedIn" products added (developer.linkedin.com).
@@ -8,6 +9,7 @@ const USERINFO_URL = 'https://api.linkedin.com/v2/userinfo'
 const POSTS_URL = 'https://api.linkedin.com/rest/posts'
 const IMAGES_URL = 'https://api.linkedin.com/rest/images'
 const VIDEOS_URL = 'https://api.linkedin.com/rest/videos'
+const DOCUMENTS_URL = 'https://api.linkedin.com/rest/documents'
 const LINKEDIN_API_VERSION = '202608' // bump periodically per LinkedIn's versioning docs - versions expire ~12mo after release
 
 const SCOPES = ['openid', 'profile', 'w_member_social']
@@ -176,21 +178,58 @@ export async function uploadVideo(accessToken: string, memberSub: string, videoU
   return init.value.video
 }
 
-// Shared by every publish call site: a post carries either video_url or
-// image_data_url (never both), upload whichever is set and hand back its
+// Registers + uploads a PDF via LinkedIn's Documents API (the native
+// "carousel" format), returns urn:li:document:.... Same init + pre-signed PUT
+// shape as images; LinkedIn then processes the file asynchronously, so we poll
+// until it is AVAILABLE before a post may reference it.
+export async function uploadDocument(accessToken: string, memberSub: string, pdf: Uint8Array): Promise<string> {
+  const headers = {
+    authorization: `Bearer ${accessToken}`,
+    'content-type': 'application/json',
+    'X-Restli-Protocol-Version': '2.0.0',
+    'LinkedIn-Version': LINKEDIN_API_VERSION,
+  }
+  const initRes = await fetch(`${DOCUMENTS_URL}?action=initializeUpload`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ initializeUploadRequest: { owner: `urn:li:person:${memberSub}` } }),
+  })
+  if (!initRes.ok) throw new Error(`LinkedIn document init failed: ${initRes.status} ${await initRes.text()}`)
+  const init = (await initRes.json()) as { value: { uploadUrl: string; document: string } }
+
+  const uploadRes = await fetch(init.value.uploadUrl, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: pdf as BodyInit })
+  if (!uploadRes.ok) throw new Error(`LinkedIn document upload failed: ${uploadRes.status} ${await uploadRes.text()}`)
+
+  for (let i = 0; i < 15; i++) {
+    const statusRes = await fetch(`${DOCUMENTS_URL}/${encodeURIComponent(init.value.document)}`, { headers })
+    if (statusRes.ok && ((await statusRes.json()) as { status?: string }).status === 'AVAILABLE') return init.value.document
+    await new Promise((r) => setTimeout(r, 2000))
+  }
+  throw new Error('LinkedIn document was uploaded but did not finish processing in time.')
+}
+
+// Shared by every publish call site: a post carries one of video_url,
+// image_data_url or document_slides (never more than one), upload whichever is set and hand back its
 // media URN for publishPost. Replaces what used to be the same
 // `image_data_url ? uploadImage(...) : null` line duplicated 4 times.
 export async function uploadPostMedia(
   accessToken: string,
   memberSub: string,
-  post: { video_url?: string | null; image_data_url?: string | null },
-): Promise<{ urn: string; kind: 'image' | 'video' } | null> {
+  post: { video_url?: string | null; image_data_url?: string | null; document_slides?: unknown; document_title?: string | null; body?: string },
+  brand?: { primary?: string | null; secondary?: string | null },
+): Promise<{ urn: string; kind: 'image' | 'video' | 'document'; title?: string } | null> {
   if (post.video_url) return { urn: await uploadVideo(accessToken, memberSub, post.video_url), kind: 'video' }
+  const doc = post.document_slides as { slides?: Carousel['slides']; cta?: string } | null | undefined
+  if (doc?.slides?.length) {
+    const title = post.document_title || doc.slides[0].heading
+    const pdf = await renderCarouselPdf({ title, caption: '', slides: doc.slides, cta: doc.cta || 'Save this for later' }, brand)
+    return { urn: await uploadDocument(accessToken, memberSub, pdf), kind: 'document', title }
+  }
   if (post.image_data_url) return { urn: await uploadImage(accessToken, memberSub, post.image_data_url), kind: 'image' }
   return null
 }
 
-export async function publishPost(accessToken: string, memberSub: string, body: string, mediaUrn?: string | null) {
+export async function publishPost(accessToken: string, memberSub: string, body: string, media?: { urn: string; title?: string } | null) {
   const res = await fetch(POSTS_URL, {
     method: 'POST',
     headers: {
@@ -208,7 +247,7 @@ export async function publishPost(accessToken: string, memberSub: string, body: 
         targetEntities: [],
         thirdPartyDistributionChannels: [],
       },
-      ...(mediaUrn ? { content: { media: { id: mediaUrn } } } : {}),
+      ...(media ? { content: { media: { id: media.urn, ...(media.title ? { title: media.title } : {}) } } } : {}),
       lifecycleState: 'PUBLISHED',
       isReshareDisabledByAuthor: false,
     }),

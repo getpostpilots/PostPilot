@@ -151,3 +151,6 @@ audit rather than building them speculatively:
 
 ## LinkedIn playbook / Train your AI
 Every draft is written against `src/lib/linkedin-playbook.ts` (rules, 4 post shapes, post-generation checks with one retry) plus per-account custom rules (`linkedin_accounts.ai_training`, migration 0011, edited in Setup > Train your AI). Source: Algorithm Report 2026, Richard van der Blom, used with the author's permission.
+
+## Carousels + learning loop
+Third media choice "Carousel (PDF)": `lib/carousel.ts` has the AI write slides (7-11 total, unbranded cover, one CTA slide, 300-400 char caption) and renders them with pdf-lib at publish time; `lib/linkedin.ts` uploads via the Documents API. Owners log per-post results on the Published page (LinkedIn analytics needs a scope we lack); `lib/learning.ts` turns them into insights, a bias for the next post shape, and prompt learnings. Migration 0012 is manual; `server/insert-post.ts` tolerates it not being run yet (except for carousels).

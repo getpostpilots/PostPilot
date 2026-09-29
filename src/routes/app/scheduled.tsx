@@ -1,3 +1,4 @@
+import { CarouselPreview } from '../../components/carousel-preview'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { getScheduledPageData } from '../../server/dashboard'
@@ -183,6 +184,7 @@ function ScheduledPostRow({ post, busy, onBusy }: { post: any; busy: boolean; on
           </summary>
           <div className="grid gap-3 border-t p-4">
             {post.image_data_url && <img src={post.image_data_url} alt="" className="max-h-96 w-fit rounded-md border object-cover" />}
+            <CarouselPreview post={post} />
             {post.video_url && (
               <div className="grid gap-2">
                 <video src={post.video_url} poster={post.video_thumbnail_url ?? undefined} controls className="max-h-96 w-fit rounded-md border" />

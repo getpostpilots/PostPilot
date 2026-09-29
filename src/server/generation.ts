@@ -3,6 +3,9 @@ import { requireUser } from '../lib/supabase-server'
 import { generateDraft } from '../lib/ai'
 import { fetchImageAsDataUrl, generateImageReliably, imagePromptFor } from '../lib/image-ai'
 import { findStockVideo } from '../lib/video-ai'
+import { generateCarousel } from '../lib/carousel'
+import { chooseStructure, computeInsights, learningsPrompt, loadResults } from '../lib/learning'
+import { insertPost } from './insert-post'
 import { getProvider } from '../lib/ai-providers'
 import { resolveApiKey } from './settings'
 import { resolveImageUrls } from './image-library'
@@ -127,27 +130,27 @@ export const generateForPillar = createServerFn({ method: 'POST' })
       .single()
 
     try {
-      const body = await generateDraft(
-        key.provider,
-        key.apiKey,
-        key.model ?? undefined,
-        key.base_url ?? undefined,
-        {
-          voiceProfileSample:
-            voice?.source_posts?.slice(0, 5).join('\n\n---\n\n') ?? null,
-          pillarName: pillar.name,
-          pillarDescription: pillar.description,
-          pillarKind: pillar.kind,
-          founderBeliefs: beliefs ?? [],
-          primaryAudience: account.primary_audience,
-          ctaMechanic: pillar.cta_mechanic,
-          recentPosts: (recent ?? []).map((p) => p.body),
-          companyDescription: account.brand_description,
-          customRules: account.ai_training,
-        },
-      )
-
       const mediaType = nextMediaType(pillar)
+      const results = await loadResults(supabase, data.accountId)
+      const insights = computeInsights(results)
+      const structure = chooseStructure(results, insights)
+      const ctx = {
+        voiceProfileSample: voice?.source_posts?.slice(0, 5).join('\n\n---\n\n') ?? null,
+        pillarName: pillar.name,
+        pillarDescription: pillar.description,
+        pillarKind: pillar.kind,
+        founderBeliefs: beliefs ?? [],
+        primaryAudience: account.primary_audience,
+        ctaMechanic: pillar.cta_mechanic,
+        recentPosts: (recent ?? []).map((p) => p.body),
+        companyDescription: account.brand_description,
+        customRules: account.ai_training,
+        structure,
+        learnings: learningsPrompt(insights),
+      }
+      // A carousel writes its own short caption + slides; everything else is a full text post.
+      const carousel = mediaType === 'document' ? await generateCarousel(key.provider, key.apiKey, key.model ?? undefined, key.base_url ?? undefined, ctx) : null
+      const body = carousel ? carousel.caption : await generateDraft(key.provider, key.apiKey, key.model ?? undefined, key.base_url ?? undefined, ctx)
 
       // Media is mandatory: any failure below throws, so no text-only draft
       // is saved (the catch marks the job failed with the reason).
@@ -198,9 +201,9 @@ export const generateForPillar = createServerFn({ method: 'POST' })
         video = { url: found.picked.videoUrl, thumbnailUrl: found.picked.thumbnailUrl, searchQuery: found.searchQuery, provider: found.picked.provider, providerId: found.picked.providerId }
       }
 
-      const { data: post } = await supabase
-        .from('posts')
-        .insert({
+      const { data: post } = await insertPost(
+        supabase,
+        {
           user_id: user.id,
           account_id: data.accountId,
           pillar_id: data.pillarId,
@@ -213,9 +216,13 @@ export const generateForPillar = createServerFn({ method: 'POST' })
           video_provider: video?.provider ?? null,
           video_provider_id: video?.providerId ?? null,
           state: 'draft',
-        })
-        .select()
-        .single()
+        },
+        {
+          structure: carousel ? 'carousel' : structure.id,
+          document_title: carousel?.title ?? null,
+          document_slides: carousel ? { slides: carousel.slides, cta: carousel.cta } : null,
+        },
+      )
 
       await supabase.from('content_pillars').update({ last_media_type: mediaType }).eq('id', data.pillarId)
 

@@ -16,9 +16,13 @@ export type GenerationContext = {
   companyDescription: string | null
   // Account-level "Train your AI" rules, appended after the built-in playbook.
   customRules?: string | null
+  // Chosen post shape (lib/learning.ts chooseStructure) and results-based insights.
+  structure?: { label: string; guide: string }
+  learnings?: string
 }
 
-function buildPrompt(ctx: GenerationContext, structure = pickStructure()): string {
+function buildPrompt(ctx: GenerationContext): string {
+  const structure = ctx.structure ?? pickStructure()
   const beliefs = ctx.founderBeliefs
     .map((b) => `- ${b.label}: ${b.belief}${b.challenges ? ` (argues against: ${b.challenges})` : ''}`)
     .join('\n')
@@ -36,6 +40,7 @@ function buildPrompt(ctx: GenerationContext, structure = pickStructure()): strin
     recent ? `Do not repeat these already-published posts:\n${recent}` : '',
     `LinkedIn playbook (follow every rule):\n${PLAYBOOK_RULES.map((r) => `- ${r}`).join('\n')}`,
     ctx.customRules?.trim() ? `The account owner's own rules (these take priority):\n${ctx.customRules.trim()}` : '',
+    ctx.learnings ?? '',
     `Shape this post as a "${structure.label}": ${structure.guide}`,
     'Output only the post body, no preamble, no markdown. Up to 3 relevant hashtags at the very end are allowed, or none.',
     'Never use an em dash (—) anywhere in the post, under any circumstance. Use a period, comma, or short separate sentence instead.',

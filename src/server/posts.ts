@@ -116,6 +116,30 @@ export const updatePostBody = createServerFn({ method: 'POST' })
     return { ok: true }
   })
 
+// Owner-entered results for a published post (LinkedIn's analytics API needs a
+// restricted scope this app lacks). Feeds lib/learning.ts.
+export const savePostResults = createServerFn({ method: 'POST' })
+  .validator((data: { postId: string; impressions: number; reactions: number; comments: number; saves: number; reposts: number }) => data)
+  .handler(async ({ data }) => {
+    const n = (v: number) => Math.max(0, Math.round(Number(v) || 0))
+    const row = {
+      impressions: n(data.impressions),
+      reactions: n(data.reactions),
+      comments_count: n(data.comments),
+      saves: n(data.saves),
+      reposts: n(data.reposts),
+      metrics_updated_at: new Date().toISOString(),
+    }
+    if (DEMO_MODE) {
+      Object.assign(demoPosts.find((p) => p.id === data.postId) ?? {}, row)
+      return { ok: true, ...row }
+    }
+    const { supabase } = await requireUser()
+    const { error } = await supabase.from('posts').update(row).eq('id', data.postId)
+    if (error) throw new Error(error.message.includes('column') ? 'Run migration 0012 in the Supabase SQL Editor first.' : error.message)
+    return { ok: true, ...row }
+  })
+
 export const deletePost = createServerFn({ method: 'POST' })
   .validator((data: { postId: string }) => data)
   .handler(async ({ data }) => {
@@ -287,8 +311,8 @@ export const publishNow = createServerFn({ method: 'POST' })
 
     try {
       const accessToken = await getValidAccessToken(account, supabase)
-      const media = await uploadPostMedia(accessToken, account.member_sub, post)
-      const urn = await publishPost(accessToken, account.member_sub, post.body, media?.urn)
+      const media = await uploadPostMedia(accessToken, account.member_sub, post, { primary: account.brand_primary_color, secondary: account.brand_secondary_color })
+      const urn = await publishPost(accessToken, account.member_sub, post.body, media)
       await supabase
         .from('posts')
         .update({
@@ -373,8 +397,8 @@ export const runDueScheduledPosts = createServerOnlyFn(async () => {
 
     try {
       const accessToken = await getValidAccessToken(account, supabase)
-      const media = await uploadPostMedia(accessToken, account.member_sub, post)
-      const urn = await publishPost(accessToken, account.member_sub, post.body, media?.urn)
+      const media = await uploadPostMedia(accessToken, account.member_sub, post, { primary: account.brand_primary_color, secondary: account.brand_secondary_color })
+      const urn = await publishPost(accessToken, account.member_sub, post.body, media)
       await supabase
         .from('posts')
         .update({

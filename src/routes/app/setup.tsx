@@ -389,6 +389,7 @@ type PillarRow = {
   ctaMechanic: 'discussion' | 'comment_gate'
   mediaImage: boolean
   mediaVideo: boolean
+  mediaDocument: boolean
 }
 
 function PillarsCard({ accountId, pillars, onSaved }: { accountId: string; pillars: any[]; onSaved: (m: string) => void }) {
@@ -402,8 +403,9 @@ function PillarsCard({ accountId, pillars, onSaved }: { accountId: string; pilla
           ctaMechanic: p.cta_mechanic,
           mediaImage: p.media_image ?? true,
           mediaVideo: p.media_video ?? false,
+          mediaDocument: p.media_document ?? false,
         }))
-      : [{ name: '', description: '', kind: 'founder', targetShare: 0.5, ctaMechanic: 'discussion', mediaImage: true, mediaVideo: false }],
+      : [{ name: '', description: '', kind: 'founder', targetShare: 0.5, ctaMechanic: 'discussion', mediaImage: true, mediaVideo: false, mediaDocument: false }],
   )
   const [busy, setBusy] = useState(false)
   const founderShare = rows.filter((r) => r.kind === 'founder').reduce((s, r) => s + (r.targetShare || 0), 0)
@@ -448,7 +450,7 @@ function PillarsCard({ accountId, pillars, onSaved }: { accountId: string; pilla
                 <input
                   type="checkbox"
                   checked={row.mediaImage}
-                  onChange={(e) => (e.target.checked || row.mediaVideo) && update(i, { mediaImage: e.target.checked })}
+                  onChange={(e) => (e.target.checked || row.mediaVideo || row.mediaDocument) && update(i, { mediaImage: e.target.checked })}
                 />
                 Image
               </label>
@@ -456,11 +458,19 @@ function PillarsCard({ accountId, pillars, onSaved }: { accountId: string; pilla
                 <input
                   type="checkbox"
                   checked={row.mediaVideo}
-                  onChange={(e) => (e.target.checked || row.mediaImage) && update(i, { mediaVideo: e.target.checked })}
+                  onChange={(e) => (e.target.checked || row.mediaImage || row.mediaDocument) && update(i, { mediaVideo: e.target.checked })}
                 />
                 Video
               </label>
-              {row.mediaImage && row.mediaVideo && <span className="text-xs text-muted-foreground">(alternates image/video each post)</span>}
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={row.mediaDocument}
+                  onChange={(e) => (e.target.checked || row.mediaImage || row.mediaVideo) && update(i, { mediaDocument: e.target.checked })}
+                />
+                Carousel (PDF)
+              </label>
+              {[row.mediaImage, row.mediaVideo, row.mediaDocument].filter(Boolean).length > 1 && <span className="text-xs text-muted-foreground">(rotates between the checked types each post)</span>}
             </div>
           </div>
         ))}
@@ -468,7 +478,7 @@ function PillarsCard({ accountId, pillars, onSaved }: { accountId: string; pilla
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setRows((rs) => [...rs, { name: '', description: '', kind: 'founder', targetShare: 0, ctaMechanic: 'discussion', mediaImage: true, mediaVideo: false }])}
+            onClick={() => setRows((rs) => [...rs, { name: '', description: '', kind: 'founder', targetShare: 0, ctaMechanic: 'discussion', mediaImage: true, mediaVideo: false, mediaDocument: false }])}
           >
             Add pillar
           </Button>

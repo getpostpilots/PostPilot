@@ -35,6 +35,7 @@ export const savePillars = createServerFn({ method: 'POST' })
         ctaMechanic: 'discussion' | 'comment_gate'
         mediaImage: boolean
         mediaVideo: boolean
+        mediaDocument?: boolean
       }>
     }) => data,
   )
@@ -53,6 +54,7 @@ export const savePillars = createServerFn({ method: 'POST' })
           active: true,
           media_image: p.mediaImage,
           media_video: p.mediaVideo,
+          media_document: p.mediaDocument ?? false,
           last_media_type: null as 'image' | 'video' | null,
         })),
       )
@@ -72,6 +74,7 @@ export const savePillars = createServerFn({ method: 'POST' })
         cta_mechanic: p.ctaMechanic,
         media_image: p.mediaImage,
         media_video: p.mediaVideo,
+        media_document: p.mediaDocument ?? false,
       })),
     )
     if (error) throw new Error(error.message)
