@@ -22,11 +22,12 @@ function carouselPrompt(ctx: GenerationContext): string {
     `Carousel rules:
 - title: the cover slide headline, max 10 words. State the benefit and add a curiosity cue. No company branding.
 - slides: ${MIN_SLIDES} to ${MAX_SLIDES} content slides. Each has ONE idea: a heading (max 8 words) and a body (max 28 words). Concrete and specific (real numbers, scenarios, steps), never generic tips or motivational quotes. Readable on a phone.
-- cta: the final slide, ONE clear action in max 14 words (e.g. save this, comment your answer). No selling.
-- caption: 300 to 400 characters. One personal hook and one specific question at the end. Do not preview or list the slides. No links, no hashtags.`,
+- cta: the final slide, exactly ONE clear action in max 14 words (e.g. "Save this for your next intake review"). Never two actions, no selling.
+- caption: 300 to 380 characters (count carefully, never over 400). One personal hook and one specific question at the end. Do not preview or list the slides. No links, no hashtags.`,
     `General writing rules:\n${PLAYBOOK_RULES.slice(0, 6).map((r) => `- ${r}`).join('\n')}`,
     ctx.learnings ?? '',
     ctx.customRules?.trim() ? `The account owner's own rules (priority):\n${ctx.customRules.trim()}` : '',
+    'Never invent statistics, percentages, client names, results or anecdotes. Only use numbers and stories that appear in the context above; otherwise use sharp reasoning or an explicitly hypothetical scenario ("Picture an agency that...") and no fake numbers.',
     'Never use an em dash anywhere.',
     'Output ONLY valid JSON: {"title": string, "caption": string, "slides": [{"heading": string, "body": string}], "cta": string}',
   ]

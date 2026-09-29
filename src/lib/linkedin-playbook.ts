@@ -13,7 +13,7 @@ export const PLAYBOOK_RULES = [
   'Positioning: if you establish credibility, do it inside the post in fresh wording. Never append a repeated signature block or templated credentials.',
   'Core message: short paragraphs, generous line breaks, and numbered lists or old-way vs new-way contrast pairs so it scans on a phone. No walls of text.',
   'Length: 1,400 to 1,800 characters. Under 600 underperforms, over 2,000 loses readers before the end.',
-  'Specificity beats generic advice. Every post needs at least one of: a surprising data point, a niche-specific scenario, or a perspective only this writer could offer. Prefer a real client, a real number, an actual decision over vague vulnerability.',
+  'Specificity beats generic advice. Every post needs at least one of: a surprising data point, a niche-specific scenario, or a perspective only this writer could offer. Use a real detail only when it appears in the context you were given (company description, beliefs, the account rules). NEVER invent statistics, percentages, client names, client results or personal anecdotes. With no real detail supplied, make the point with sharp reasoning or an explicitly hypothetical scenario ("Picture an agency that...") and leave numbers out.',
   'Conclusion: one deliberate line that lands the takeaway, then the call to engage.',
   'Call to engage: end with a specific closed question (yes/no or either/or, draws the most comments) or a specific open question (draws longer, deeper replies) or a bold closing statement. Never a commercial call to action ("DM me", "book a call") and never engagement bait ("comment YES to get X").',
   'No external links in the post body (they cost reach). No shortened or hidden links.',
