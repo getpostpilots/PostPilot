@@ -2,7 +2,8 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { getDashboard } from '../../server/dashboard'
 import { getKeyStatus, killSwitch, removeApiKey, saveApiKey, saveConfig, saveFounderPov, savePillars, saveVoice } from '../../server/settings'
-import { fetchBrandFromWebsite, saveBrand, saveVideoStyle } from '../../server/brand'
+import { fetchBrandFromWebsite, saveAiTraining, saveBrand, saveVideoStyle } from '../../server/brand'
+import { NURTURE_CHECKLIST, PLAYBOOK_RULES, PLAYBOOK_SOURCE, STRUCTURES } from '../../lib/linkedin-playbook'
 import ThemeToggle from '../../components/ThemeToggle'
 import { AI_PROVIDERS, getProvider } from '../../lib/ai-providers'
 import { Button } from '../../components/ui/button'
@@ -75,6 +76,7 @@ function Setup() {
       </Card>
 
       <BrandCard account={account} onSaved={async (msg) => { setMessage(msg); await refresh() }} />
+      <TrainAiCard account={account} onSaved={async (msg) => { setMessage(msg); await refresh() }} />
       <VideoStyleCard account={account} onSaved={async (msg) => { setMessage(msg); await refresh() }} />
       <ApiKeyCard status={keyStatus} onSaved={async (msg) => { setMessage(msg); await refresh() }} />
       <VoiceCard accountId={account.id} voiceProfiles={account.voice_profiles ?? []} onSaved={async (msg) => { setMessage(msg); await refresh() }} />
@@ -167,6 +169,63 @@ function BrandCard({ account, onSaved }: { account: any; onSaved: (m: string) =>
 
         <Button size="sm" className="w-fit" disabled={busy} onClick={save}>
           Save brand
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+function TrainAiCard({ account, onSaved }: { account: any; onSaved: (m: string) => void }) {
+  const [rules, setRules] = useState(account.ai_training ?? '')
+  const [busy, setBusy] = useState(false)
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">Train your AI</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        <p className="text-sm text-muted-foreground">
+          Every post is written against the LinkedIn playbook below (how the 2026 feed ranks content). Add your own rules underneath: they take priority, apply to pillars and campaigns, and only affect new drafts.
+        </p>
+        <details className="rounded border p-3 text-sm">
+          <summary className="cursor-pointer font-medium">Built-in playbook ({PLAYBOOK_RULES.length} rules, 4 post shapes)</summary>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+            {PLAYBOOK_RULES.map((r) => <li key={r}>{r}</li>)}
+          </ul>
+          <p className="mt-3 font-medium">Post shapes rotated automatically</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">
+            {STRUCTURES.map((s) => <li key={s.id}><b>{s.label}:</b> {s.guide}</li>)}
+          </ul>
+          <p className="mt-3 font-medium">After it publishes (your part, not automated)</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">
+            {NURTURE_CHECKLIST.map((r) => <li key={r}>{r}</li>)}
+          </ul>
+          <p className="mt-3 text-xs text-muted-foreground">Source: {PLAYBOOK_SOURCE}</p>
+        </details>
+        <Textarea
+          placeholder={'Your own rules, one per line. E.g.\nAlways mention GoHighLevel agencies, never "businesses" in general\nNever use the word "leverage"\nEnd with a yes/no question'}
+          rows={6}
+          value={rules}
+          onChange={(e) => setRules(e.target.value)}
+        />
+        <Button
+          size="sm"
+          className="w-fit"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true)
+            try {
+              await saveAiTraining({ data: { accountId: account.id, rules } })
+              onSaved('AI training saved.')
+            } catch (err) {
+              onSaved(err instanceof Error ? `Failed to save AI training: ${err.message}` : 'Failed to save AI training.')
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          Save AI training
         </Button>
       </CardContent>
     </Card>

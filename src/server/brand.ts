@@ -78,6 +78,21 @@ export const saveBrand = createServerFn({ method: 'POST' })
     return { ok: true }
   })
 
+// Account-level "Train your AI" rules, appended to every draft prompt after
+// the built-in playbook (lib/linkedin-playbook.ts).
+export const saveAiTraining = createServerFn({ method: 'POST' })
+  .validator((data: { accountId: string; rules: string }) => data)
+  .handler(async ({ data }) => {
+    if (DEMO_MODE) {
+      Object.assign(demoAccount, { ai_training: data.rules || null })
+      return { ok: true }
+    }
+    const { supabase } = await requireUser()
+    const { error } = await supabase.from('linkedin_accounts').update({ ai_training: data.rules || null }).eq('id', data.accountId)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  })
+
 // Guided "video style" profile - fed into the stock-search query builder
 // (lib/video-ai.ts) instead of AI-generating video, same account-level
 // pattern as saveBrand.

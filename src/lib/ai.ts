@@ -1,4 +1,5 @@
 import { getProvider } from './ai-providers'
+import { PLAYBOOK_RULES, checkDraft, pickStructure, trimHashtags } from './linkedin-playbook'
 
 // Server-only: makes the actual HTTP call to the user's chosen provider with
 // their decrypted BYO key. Never import this from client code.
@@ -13,9 +14,11 @@ export type GenerationContext = {
   ctaMechanic: 'discussion' | 'comment_gate'
   recentPosts: string[]
   companyDescription: string | null
+  // Account-level "Train your AI" rules, appended after the built-in playbook.
+  customRules?: string | null
 }
 
-function buildPrompt(ctx: GenerationContext): string {
+function buildPrompt(ctx: GenerationContext, structure = pickStructure()): string {
   const beliefs = ctx.founderBeliefs
     .map((b) => `- ${b.label}: ${b.belief}${b.challenges ? ` (argues against: ${b.challenges})` : ''}`)
     .join('\n')
@@ -25,13 +28,16 @@ function buildPrompt(ctx: GenerationContext): string {
     `Write one LinkedIn post for the pillar "${ctx.pillarName}": ${ctx.pillarDescription}`,
     ctx.pillarKind === 'founder'
       ? 'This is founder-led: the writer\'s own thinking is the subject. The product may appear once, as evidence, never as the pitch. Close by inviting disagreement or discussion, not a signup.'
-      : 'This is product-led: the reader\'s problem is the subject, but the post must still land on a view the writer holds, not generic advice. Close with a comment-gate prompt, not a link.',
+      : 'This is product-led: the reader\'s problem is the subject, but the post must still land on a view the writer holds, not generic advice. Never include a link or a sales pitch.',
     ctx.primaryAudience ? `Primary audience: ${ctx.primaryAudience}.` : '',
     ctx.companyDescription ? `Company context: ${ctx.companyDescription}` : '',
     beliefs ? `Beliefs to draw from (do not invent opinions beyond these):\n${beliefs}` : '',
     ctx.voiceProfileSample ? `Match this voice exactly - sentence length, openers, words used/avoided:\n${ctx.voiceProfileSample}` : '',
     recent ? `Do not repeat these already-published posts:\n${recent}` : '',
-    'Output only the post body, no preamble, no hashtags, no markdown.',
+    `LinkedIn playbook (follow every rule):\n${PLAYBOOK_RULES.map((r) => `- ${r}`).join('\n')}`,
+    ctx.customRules?.trim() ? `The account owner's own rules (these take priority):\n${ctx.customRules.trim()}` : '',
+    `Shape this post as a "${structure.label}": ${structure.guide}`,
+    'Output only the post body, no preamble, no markdown. Up to 3 relevant hashtags at the very end are allowed, or none.',
     'Never use an em dash (—) anywhere in the post, under any circumstance. Use a period, comma, or short separate sentence instead.',
   ]
     .filter(Boolean)
@@ -97,6 +103,22 @@ export async function completeText(providerId: string, apiKey: string, model: st
 }
 
 export async function generateDraft(providerId: string, apiKey: string, model: string | undefined, baseUrlOverride: string | undefined, ctx: GenerationContext): Promise<string> {
-  const text = await completeText(providerId, apiKey, model, baseUrlOverride, buildPrompt(ctx))
-  return stripEmDashes(text)
+  const prompt = buildPrompt(ctx)
+  let draft = trimHashtags(stripEmDashes(await completeText(providerId, apiKey, model, baseUrlOverride, prompt, 1200)))
+  const issues = checkDraft(draft)
+  // One targeted retry when the draft breaks a hard playbook rule; keep whichever version has fewer problems.
+  if (issues.length > 0) {
+    const retry = trimHashtags(
+      stripEmDashes(
+        await completeText(providerId, apiKey, model, baseUrlOverride, `${prompt}
+
+Your previous draft:
+${draft}
+
+Rewrite it fixing these problems: ${issues.join('; ')}. Output only the corrected post body.`, 1200),
+      ),
+    )
+    if (checkDraft(retry).length <= issues.length) draft = retry
+  }
+  return draft
 }

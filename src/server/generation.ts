@@ -143,6 +143,7 @@ export const generateForPillar = createServerFn({ method: 'POST' })
           ctaMechanic: pillar.cta_mechanic,
           recentPosts: (recent ?? []).map((p) => p.body),
           companyDescription: account.brand_description,
+          customRules: account.ai_training,
         },
       )
 

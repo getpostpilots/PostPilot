@@ -150,6 +150,7 @@ async function runCampaign(supabase: AdminClient, campaign: any, opts: { skipSch
     ctaMechanic: 'discussion',
     recentPosts: recentBodies,
     companyDescription: account.brand_description,
+    customRules: account.ai_training,
   })
 
   const mediaType = nextMediaType(campaign)

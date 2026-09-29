@@ -25,6 +25,7 @@ export const demoAccount = {
   video_style_description: null as string | null,
   video_style_include: null as string | null,
   video_style_avoid: null as string | null,
+  ai_training: null as string | null,
   created_at: now(),
 }
 

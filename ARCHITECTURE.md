@@ -148,3 +148,6 @@ audit rather than building them speculatively:
    using OpenID Connect" + "Share on LinkedIn" products, set the redirect URL
    to `<site>/api/linkedin/callback`, fill in the client id/secret.
 5. `npm run dev`
+
+## LinkedIn playbook / Train your AI
+Every draft is written against `src/lib/linkedin-playbook.ts` (rules, 4 post shapes, post-generation checks with one retry) plus per-account custom rules (`linkedin_accounts.ai_training`, migration 0011, edited in Setup > Train your AI). Source: Algorithm Report 2026, Richard van der Blom, used with the author's permission.
