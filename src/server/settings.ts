@@ -61,8 +61,13 @@ export const savePillars = createServerFn({ method: 'POST' })
       return { count: demoPillars.length }
     }
     const { user, supabase } = await requireUser()
-    await supabase.from('content_pillars').delete().eq('account_id', data.accountId)
-    if (data.pillars.length === 0) return { count: 0 }
+    // Insert the new set first and only then remove the old rows, so a failed insert cannot wipe existing pillars.
+    const { data: oldRows } = await supabase.from('content_pillars').select('id').eq('account_id', data.accountId)
+    const oldIds = (oldRows ?? []).map((r: { id: string }) => r.id)
+    if (data.pillars.length === 0) {
+      if (oldIds.length) await supabase.from('content_pillars').delete().in('id', oldIds)
+      return { count: 0 }
+    }
     const { error } = await supabase.from('content_pillars').insert(
       data.pillars.map((p) => ({
         user_id: user.id,
@@ -74,10 +79,12 @@ export const savePillars = createServerFn({ method: 'POST' })
         cta_mechanic: p.ctaMechanic,
         media_image: p.mediaImage,
         media_video: p.mediaVideo,
-        media_document: p.mediaDocument ?? false,
+        // Only sent when ticked: keeps saving working before migration 0012 adds the column.
+        ...(p.mediaDocument ? { media_document: true } : {}),
       })),
     )
     if (error) throw new Error(error.message)
+    if (oldIds.length) await supabase.from('content_pillars').delete().in('id', oldIds)
     return { count: data.pillars.length }
   })
 

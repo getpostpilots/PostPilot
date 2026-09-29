@@ -112,7 +112,8 @@ export const createCampaign = createServerFn({ method: 'POST' })
         post_time: data.postTime,
         media_image: data.mediaImage,
         media_video: data.mediaVideo,
-        media_document: data.mediaDocument ?? false,
+        // Only sent when ticked: keeps this working before migration 0012 adds the column.
+        ...(data.mediaDocument ? { media_document: true } : {}),
       })
       .select()
       .single()
@@ -199,23 +200,24 @@ export const updateCampaign = createServerFn({ method: 'POST' })
     const startDate = restarting ? new Date() : new Date(existing.start_date)
     const endDate = endDateFor(data.durationType, startDate)
 
-    const { error } = await supabase
-      .from('campaigns')
-      .update({
-        name: data.name,
-        duration_type: data.durationType,
-        start_date: startDate.toISOString().slice(0, 10),
-        end_date: endDate,
-        days_of_week: data.daysOfWeek,
-        post_time: data.postTime,
-        next_topic_index: 0,
-        media_image: data.mediaImage,
-        media_video: data.mediaVideo,
-        media_document: data.mediaDocument ?? false,
-        ...(restarting ? { status: 'active', last_run_date: null, last_run_at: null } : {}),
-      })
-      .eq('id', data.campaignId)
-    if (error) throw new Error(error.message)
+    const row = {
+      name: data.name,
+      duration_type: data.durationType,
+      start_date: startDate.toISOString().slice(0, 10),
+      end_date: endDate,
+      days_of_week: data.daysOfWeek,
+      post_time: data.postTime,
+      next_topic_index: 0,
+      media_image: data.mediaImage,
+      media_video: data.mediaVideo,
+      ...(restarting ? { status: 'active', last_run_date: null, last_run_at: null } : {}),
+    }
+    // media_document needs migration 0012; if it is not there yet, saving without it is fine unless carousel was ticked.
+    let { error } = await supabase.from('campaigns').update({ ...row, media_document: data.mediaDocument ?? false }).eq('id', data.campaignId)
+    if (error && /media_document/.test(error.message) && !data.mediaDocument) {
+      ;({ error } = await supabase.from('campaigns').update(row).eq('id', data.campaignId))
+    }
+    if (error) throw new Error(/media_document/.test(error.message) ? 'Run migration 0012 in the Supabase SQL Editor to enable carousels.' : error.message)
 
     // Full replace, same pattern as savePillars/saveFounderPov - simpler
     // than diffing, and topic order/content changing invalidates the old
